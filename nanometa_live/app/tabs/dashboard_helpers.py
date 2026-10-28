@@ -1198,27 +1198,13 @@ def select_verdict(
 ) -> VerdictDescriptor:
     """Pure decision: pick the verdict banner state from the analysis inputs.
 
-    Mirrors the original update_verdict_banner control flow exactly:
-
-    1. No config -> SCREENING when running, otherwise STANDBY.
-    2. overall_status == "starting" -> SCREENING (takes priority over data).
-    3. Results directory present with Kraken data -> classify the watchlist
-       hits: any critical/high-risk hit -> ACTION REQUIRED; other hits ->
-       MONITORING; no hits -> ALL CLEAR. ``pipeline_error`` outranks every
-       non-hit state in this branch (a dead pipeline must never render as a
-       clean result) but never a hit -- detections and sub-threshold hits
-       keep their state with the failure noted in the subtitle.
-    4. Results directory previously seen but now unreadable
-       (``results_dir_lost``) -> RESULTS UNAVAILABLE; a crashed run with no
-       output (``pipeline_error``) -> PIPELINE ERROR. Both distinct from
-       STANDBY on purpose.
-    5. Results directory present but no data yet and still running -> SCREENING.
-    6. Everything else (no results dir, idle with no data, load failure) ->
-       STANDBY.
-
-    ``stale_samples`` appends a clause to the data-state subtitles so
-    frozen numbers cannot present as live ones; ``run_stopped`` does the
-    same for a run ended before its input was exhausted (round-4 H2).
+    Precedence: no config -> SCREENING/STANDBY; starting -> SCREENING (a
+    dead pipeline outranks it); data present -> ``_data_verdict`` (a hit
+    always wins, ``pipeline_error`` outranks every non-hit state); no data
+    -> ``_no_data_verdict`` (RESULTS UNAVAILABLE, PIPELINE ERROR, RESULTS
+    UNREADABLE, SCREENING while running, else STANDBY). The run-health
+    inputs become subtitle clauses on the data states so frozen or partial
+    numbers cannot present as live, complete ones.
     """
     if not has_config:
         return _screening_descriptor() if pipeline_running else _standby_descriptor()

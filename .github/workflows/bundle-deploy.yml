@@ -230,7 +230,11 @@ jobs:
     # air-gapped -- the assertion that no pull happened rests on the
     # Nextflow log, not on a closed network.
     name: Export singularity bundle (amd64 build machine)
-    runs-on: ubuntu-latest
+    # apptainer 1.3.6's .deb depends on libfuse3-3, which ubuntu-latest
+    # (26.04) no longer ships (the scheduled run of 2026-10-26 and this
+    # PR's first run both failed in apt). Pin the two apptainer jobs to
+    # the LTS the package was built for.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -356,7 +360,11 @@ jobs:
   run-singularity:
     name: Import and run the bundled image (amd64 field machine)
     needs: export-singularity
-    runs-on: ubuntu-latest
+    # apptainer 1.3.6's .deb depends on libfuse3-3, which ubuntu-latest
+    # (26.04) no longer ships (the scheduled run of 2026-10-26 and this
+    # PR's first run both failed in apt). Pin the two apptainer jobs to
+    # the LTS the package was built for.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 

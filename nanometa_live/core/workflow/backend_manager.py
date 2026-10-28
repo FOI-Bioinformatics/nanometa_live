@@ -261,18 +261,7 @@ class BackendManager:
             msg = self._orphan_message(orphan)
             logging.error(msg)
             return False, msg
-        if os.path.exists(lock_file):
-            try:
-                with open(lock_file, 'r') as f:
-                    lock_data = json.load(f)
-                pid = lock_data.get("pid")
-                if pid and not self._process_exists(pid):
-                    logging.info(
-                        f"Removing stale lock file (PID {pid} no longer running)"
-                    )
-                    os.remove(lock_file)
-            except (json.JSONDecodeError, OSError):
-                pass  # If we cannot read the lock file, proceed to try acquire
+        self._reclaim_stale_lock(lock_file)
 
         try:
             # Open without truncating: 'w' emptied the holder's JSON before
@@ -300,20 +289,7 @@ class BackendManager:
 
         except BlockingIOError:
             # Another process has the lock
-            existing_info = ""
-            try:
-                with open(lock_file, 'r') as f:
-                    existing_info = f.read()
-            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
-                pass
-
-            error_msg = (
-                f"Another pipeline is already running in this directory. "
-                f"Lock file: {lock_file}"
-            )
-            if existing_info:
-                error_msg += f"\nLock info: {existing_info}"
-
+            error_msg = self._held_lock_message(lock_file)
             logging.error(error_msg)
             self._lock_fd = None
             return False, error_msg
@@ -324,6 +300,40 @@ class BackendManager:
                 self._lock_fd.close()
                 self._lock_fd = None
             return False, f"Error acquiring lock: {e}"
+
+    @classmethod
+    def _reclaim_stale_lock(cls, lock_file: str) -> None:
+        """Remove a lock whose GUI is dead (the orphan check ran first)."""
+        if not os.path.exists(lock_file):
+            return
+        try:
+            with open(lock_file, 'r') as f:
+                lock_data = json.load(f)
+            pid = lock_data.get("pid")
+            if pid and not cls._process_exists(pid):
+                logging.info(
+                    f"Removing stale lock file (PID {pid} no longer running)"
+                )
+                os.remove(lock_file)
+        except (json.JSONDecodeError, OSError):
+            pass  # If we cannot read the lock file, proceed to try acquire
+
+    @staticmethod
+    def _held_lock_message(lock_file: str) -> str:
+        """The refusal when another live process holds the lock."""
+        existing_info = ""
+        try:
+            with open(lock_file, 'r') as f:
+                existing_info = f.read()
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
+            pass
+        error_msg = (
+            f"Another pipeline is already running in this directory. "
+            f"Lock file: {lock_file}"
+        )
+        if existing_info:
+            error_msg += f"\nLock info: {existing_info}"
+        return error_msg
 
     def _write_lock_info(self) -> None:
         """Rewrite the lock file from ``self._lock_info`` (lock held)."""

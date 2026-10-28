@@ -99,6 +99,63 @@ class CheckResult:
     details: Optional[str] = None
 
 
+def _database_memory_verdict(hash_bytes: int, total: int, mmap: bool) -> CheckResult:
+    """The Database Memory row for a measured hash and host (pure)."""
+    from nanometa_live.core.config.parameter_mapping import (
+        KRAKEN2_REQUEST_HEADROOM_GB,
+    )
+    gib = 1024 ** 3
+    hash_gb = hash_bytes / gib
+    total_gb = total / gib
+    usable_gb = max(0.0, total_gb - KRAKEN_DB_MEMORY_HEADROOM_GB)
+    share = hash_bytes / total
+    # Without memory mapping a task allocates the database privately;
+    # the request the launch sends is hash + KRAKEN2_REQUEST_HEADROOM_GB.
+    full_load_gb = hash_gb + KRAKEN2_REQUEST_HEADROOM_GB
+    figures = f"database {hash_gb:.1f} GB, memory {total_gb:.0f} GB"
+
+    if hash_gb > usable_gb:
+        return CheckResult(
+            "Database Memory", False, Severity.CRITICAL,
+            f"The Kraken2 database ({hash_gb:.1f} GB) is larger than this "
+            f"machine's memory ({total_gb:.0f} GB). The classifier cannot "
+            "hold it and the run fails at its first task.",
+            details=(
+                "Use a smaller database (a field build or a MiniKraken-class "
+                "index) or a machine with more memory."
+            ),
+        )
+    if not mmap and full_load_gb > usable_gb:
+        return CheckResult(
+            "Database Memory", False, Severity.CRITICAL,
+            f"Memory mapping is off, so every classifier task loads the "
+            f"whole database privately ({full_load_gb:.0f} GB with headroom) "
+            f"and this machine has {total_gb:.0f} GB.",
+            details=(
+                "Remove kraken_memory_mapping: false from the config (memory "
+                "mapping shares the database through the page cache), or use "
+                "a smaller database."
+            ),
+        )
+    if share > KRAKEN_DB_MEMORY_WARN_SHARE:
+        return CheckResult(
+            "Database Memory", False, Severity.WARNING,
+            f"The database takes {share:.0%} of this machine's memory "
+            f"({figures}). It fits only with memory mapping, the "
+            "classifier runs one task at a time, and a retry without "
+            "memory mapping will not fit.",
+            details=(
+                "Expect slower classification. A database under "
+                f"{KRAKEN_DB_MEMORY_WARN_SHARE:.0%} of memory leaves room for "
+                "parallel classifier tasks."
+            ),
+        )
+    return CheckResult(
+        "Database Memory", True, Severity.WARNING,
+        f"Database fits in memory ({figures}, {share:.0%})",
+    )
+
+
 @dataclass
 class ReadinessReport:
     """Aggregated readiness report."""
@@ -363,62 +420,10 @@ class ReadinessChecker:
                 "Database Memory", True, Severity.INFO,
                 "Could not determine this machine's memory"
             )
-        gib = 1024 ** 3
-        hash_gb = hash_bytes / gib
-        total_gb = total / gib
-        usable_gb = max(0.0, total_gb - KRAKEN_DB_MEMORY_HEADROOM_GB)
-        share = hash_bytes / total
         mmap = True
         if "kraken_memory_mapping" in config:
             mmap = bool(config["kraken_memory_mapping"])
-        # Without memory mapping a task allocates the database privately;
-        # the request the launch sends is hash + KRAKEN2_REQUEST_HEADROOM_GB.
-        from nanometa_live.core.config.parameter_mapping import (
-            KRAKEN2_REQUEST_HEADROOM_GB,
-        )
-        full_load_gb = hash_gb + KRAKEN2_REQUEST_HEADROOM_GB
-        figures = f"database {hash_gb:.1f} GB, memory {total_gb:.0f} GB"
-
-        if hash_gb > usable_gb:
-            return CheckResult(
-                "Database Memory", False, Severity.CRITICAL,
-                f"The Kraken2 database ({hash_gb:.1f} GB) is larger than this "
-                f"machine's memory ({total_gb:.0f} GB). The classifier cannot "
-                "hold it and the run fails at its first task.",
-                details=(
-                    "Use a smaller database (a field build or a MiniKraken-class "
-                    "index) or a machine with more memory."
-                ),
-            )
-        if not mmap and full_load_gb > usable_gb:
-            return CheckResult(
-                "Database Memory", False, Severity.CRITICAL,
-                f"Memory mapping is off, so every classifier task loads the "
-                f"whole database privately ({full_load_gb:.0f} GB with headroom) "
-                f"and this machine has {total_gb:.0f} GB.",
-                details=(
-                    "Remove kraken_memory_mapping: false from the config (memory "
-                    "mapping shares the database through the page cache), or use "
-                    "a smaller database."
-                ),
-            )
-        if share > KRAKEN_DB_MEMORY_WARN_SHARE:
-            return CheckResult(
-                "Database Memory", False, Severity.WARNING,
-                f"The database takes {share:.0%} of this machine's memory "
-                f"({figures}). It fits only with memory mapping, the "
-                "classifier runs one task at a time, and a retry without "
-                "memory mapping will not fit.",
-                details=(
-                    "Expect slower classification. A database under "
-                    f"{KRAKEN_DB_MEMORY_WARN_SHARE:.0%} of memory leaves room for "
-                    "parallel classifier tasks."
-                ),
-            )
-        return CheckResult(
-            "Database Memory", True, Severity.WARNING,
-            f"Database fits in memory ({figures}, {share:.0%})",
-        )
+        return _database_memory_verdict(hash_bytes, total, mmap)
 
     def _check_db_index(self, config: Dict[str, Any], home: Path) -> CheckResult:
         db_path = config.get("kraken_db", "")
