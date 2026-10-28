@@ -1146,7 +1146,15 @@ Three concerns:
      restored path — text replace, NUL-padded in-place for binaries, symlink
      retarget (`core/workflow/conda_cache_utils.relocate_conda_cache`).
      Conda envs embed the build prefix in shebangs/binaries, so without this
-     every env fails exit-127 at first use. Absolute symlinks are made
+     every env fails exit-127 at first use. **A `.pyc` is marshal data, not a
+     C string table**: its strings are length-prefixed, so the NUL-padded
+     rewrite shifted every byte after `co_filename` and broke the module at
+     import while relocation reported zero failures (field audit 2026-10-28,
+     C1). Relocation deletes any `.pyc` carrying the old prefix instead
+     (`pyc_removed`); Python regenerates it. The bundle-deploy workflow's
+     `relocate-python-env` job imports a byte-compiled module from a
+     relocated real environment, which is the check the unit fixtures
+     (ELF-shaped blobs) could not make. Absolute symlinks are made
      relative at export (tarfile's `data` filter aborts on absolute link
      targets); import copies symlinks as symlinks. **Every patched Mach-O is
      ad-hoc re-signed** (`_resign_macho`, `/usr/bin/codesign -s -`): the byte

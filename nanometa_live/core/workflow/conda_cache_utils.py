@@ -160,6 +160,7 @@ def relocate_conda_cache(cache_dir: Path, old_prefix: str) -> Dict[str, Any]:
         "text_rewritten": 0,
         "binary_patched": 0,
         "symlinks_retargeted": 0,
+        "pyc_removed": 0,
         "failures": [],
     }
     new_prefix = str(cache_dir)
@@ -198,6 +199,24 @@ def relocate_conda_cache(cache_dir: Path, old_prefix: str) -> Dict[str, Any]:
             stats["failures"].append(str(path.relative_to(cache_dir)))
             continue
         if old_b not in data:
+            continue
+        if path.suffix == ".pyc":
+            # A .pyc is marshal data: its strings (co_filename holds the
+            # absolute build path) are length-prefixed, not NUL-terminated,
+            # so the NUL-padded rewrite below shifts every byte after the
+            # path and the module fails at import with "bad marshal data"
+            # -- while this function reported zero failures (field audit,
+            # 2026-10-28, C1). Conda byte-compiles noarch packages with the
+            # env's absolute prefix at install time, so every Python-based
+            # pipeline process was dead on arrival. Python regenerates the
+            # file from source on first import; a missing .pyc costs one
+            # compile, a patched one costs the env.
+            try:
+                path.unlink()
+                stats["pyc_removed"] += 1
+            except OSError as exc:
+                logger.warning("Could not remove %s during relocation: %s", path, exc)
+                stats["failures"].append(str(path.relative_to(cache_dir)))
             continue
         if b"\x00" in data:
             patched = _patch_binary(data, old_b, new_b)

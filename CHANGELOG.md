@@ -8,6 +8,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A pre-warmed conda bundle no longer arrives with every byte-compiled
+  Python module corrupted. Import relocates the recorded build prefix with
+  a NUL-padded rewrite meant for C string tables, and a `.pyc` is marshal
+  data with length-prefixed strings: the bytes after the path shifted, the
+  module failed at first import with "bad marshal data", and relocation
+  reported zero failures. Conda byte-compiles every noarch package with the
+  env's absolute prefix, so every Python-based pipeline process (the
+  canonical writers, the Kraken2 merger and report generator, taxpasta,
+  multiqc, nanoplot) was dead on arrival on an air-gapped machine.
+  Relocation now removes a `.pyc` that carries the old prefix (Python
+  regenerates it from source) and counts the removals; the bundle-deploy
+  workflow gained a job that builds a real Python environment under a
+  padded prefix, moves it, relocates it and imports a byte-compiled module
+  with the relocated interpreter.
 - A finished batch run is no longer described as "still classifying". A
   chunk whose reads the quality filter removes entirely never reaches the
   classifier and gets no per-batch report, so the chunk plan was never
