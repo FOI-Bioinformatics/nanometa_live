@@ -186,6 +186,51 @@ def register_startup(app, backend_manager):
             ),
         }
 
+    _orphan_check_lock = threading.Lock()
+    _orphan_checked = {"done": False}
+
+    @app.callback(
+        Output("toast-message", "data", allow_duplicate=True),
+        # The resolved results folder, not app-config: a second callback
+        # with the same Output AND the same Input as
+        # warn_about_missing_paths_on_startup shares its callback_map key
+        # and silently replaces it.
+        Input("results-dir-path", "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def warn_about_orphan_run_on_startup(results_dir):
+        """Name a pipeline from an earlier session that is still running.
+
+        Nextflow is started in its own session and survives a GUI crash,
+        so a run can be writing the results folder with no dashboard
+        attached to it. The lock file records the pipeline's PID once it
+        is known (BackendManager._record_nextflow_pid); on boot this reads
+        that lock for the resolved results folder and says so once, with
+        the PID, so the operator neither waits for a verdict this session
+        will never compute nor starts a second run into the same folder
+        (which _acquire_lock now refuses anyway). Field audit 2026-10-28,
+        H3. Attaching to the orphan is not offered: the manager cannot
+        adopt a subprocess handle it did not create.
+        """
+        if not results_dir:
+            return no_update
+        with _orphan_check_lock:
+            if _orphan_checked["done"]:
+                return no_update
+            _orphan_checked["done"] = True
+        try:
+            from nanometa_live.core.workflow.backend_manager import BackendManager
+            orphan = BackendManager.read_orphan_run(str(results_dir))
+        except Exception:
+            return no_update
+        if not orphan:
+            return no_update
+        return {
+            "type": "warning",
+            "title": "A pipeline from an earlier session is still running",
+            "message": BackendManager._orphan_message(orphan),
+        }
+
     @app.callback(
         Output("internet-check-toast", "data"),
         Input("app-config", "data"),

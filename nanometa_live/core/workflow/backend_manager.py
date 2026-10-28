@@ -75,6 +75,7 @@ class BackendManager:
         # Note: legacy _prep_status_lock removed along with prepare_data methods
         self._lock_fd: Optional[IO] = None  # File lock descriptor for multi-user safety
         self._lock_file_path: Optional[str] = None  # Path to lock file
+        self._lock_info: Dict[str, Any] = {}  # What the held lock file says
         # Start/stop transition state for the async click path. start() and
         # stop() block for tens of seconds (preflight probes, process.wait);
         # the GUI runs them in a daemon THREAD in this process -- the
@@ -247,23 +248,26 @@ class BackendManager:
         lock_file = os.path.join(results_dir, ".nanometa.lock")
         self._lock_file_path = lock_file
 
-        # Check for stale lock from a crashed process
-        if os.path.exists(lock_file):
-            try:
-                with open(lock_file, 'r') as f:
-                    lock_data = json.load(f)
-                pid = lock_data.get("pid")
-                if pid and not self._process_exists(pid):
-                    logging.info(
-                        f"Removing stale lock file (PID {pid} no longer running)"
-                    )
-                    os.remove(lock_file)
-            except (json.JSONDecodeError, OSError):
-                pass  # If we cannot read the lock file, proceed to try acquire
+        # A lock left by a GUI that died is stale only if the pipeline it
+        # launched died with it. Nextflow is started in its own session and
+        # survives the GUI, and the lock used to record the GUI's PID alone,
+        # so the next launch read the dead GUI, called the lock stale, and
+        # started a second pipeline into the same outdir and work dir
+        # (field audit 2026-10-28, H3). The pipeline's own PID is recorded
+        # once it is known (_record_nextflow_pid); while that process lives
+        # the folder is busy, whoever started it.
+        orphan = self.read_orphan_run(results_dir)
+        if orphan:
+            msg = self._orphan_message(orphan)
+            logging.error(msg)
+            return False, msg
+        self._reclaim_stale_lock(lock_file)
 
         try:
-            # Create/open lock file
-            self._lock_fd = open(lock_file, 'w')
+            # Open without truncating: 'w' emptied the holder's JSON before
+            # flock could refuse, so a second instance reported an empty
+            # "Lock info". Truncate only once the lock is ours.
+            self._lock_fd = open(lock_file, 'a+')
 
             # Try to acquire exclusive, non-blocking lock
             if fcntl:
@@ -277,28 +281,15 @@ class BackendManager:
                 "acquired_at": datetime.now().isoformat(),
                 "data_dir": self.data_dir
             }
-            self._lock_fd.write(json.dumps(lock_info, indent=2))
-            self._lock_fd.flush()
+            self._lock_info = lock_info
+            self._write_lock_info()
 
             logging.info(f"Acquired lock on results directory: {results_dir}")
             return True, "Lock acquired successfully"
 
         except BlockingIOError:
             # Another process has the lock
-            existing_info = ""
-            try:
-                with open(lock_file, 'r') as f:
-                    existing_info = f.read()
-            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
-                pass
-
-            error_msg = (
-                f"Another pipeline is already running in this directory. "
-                f"Lock file: {lock_file}"
-            )
-            if existing_info:
-                error_msg += f"\nLock info: {existing_info}"
-
+            error_msg = self._held_lock_message(lock_file)
             logging.error(error_msg)
             self._lock_fd = None
             return False, error_msg
@@ -309,6 +300,117 @@ class BackendManager:
                 self._lock_fd.close()
                 self._lock_fd = None
             return False, f"Error acquiring lock: {e}"
+
+    @classmethod
+    def _reclaim_stale_lock(cls, lock_file: str) -> None:
+        """Remove a lock whose GUI is dead (the orphan check ran first)."""
+        if not os.path.exists(lock_file):
+            return
+        try:
+            with open(lock_file, 'r') as f:
+                lock_data = json.load(f)
+            pid = lock_data.get("pid")
+            if pid and not cls._process_exists(pid):
+                logging.info(
+                    f"Removing stale lock file (PID {pid} no longer running)"
+                )
+                os.remove(lock_file)
+        except (json.JSONDecodeError, OSError):
+            pass  # If we cannot read the lock file, proceed to try acquire
+
+    @staticmethod
+    def _held_lock_message(lock_file: str) -> str:
+        """The refusal when another live process holds the lock."""
+        existing_info = ""
+        try:
+            with open(lock_file, 'r') as f:
+                existing_info = f.read()
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
+            pass
+        error_msg = (
+            f"Another pipeline is already running in this directory. "
+            f"Lock file: {lock_file}"
+        )
+        if existing_info:
+            error_msg += f"\nLock info: {existing_info}"
+        return error_msg
+
+    def _write_lock_info(self) -> None:
+        """Rewrite the lock file from ``self._lock_info`` (lock held)."""
+        if not self._lock_fd:
+            return
+        try:
+            self._lock_fd.seek(0)
+            self._lock_fd.truncate()
+            self._lock_fd.write(json.dumps(self._lock_info, indent=2))
+            self._lock_fd.flush()
+        except (OSError, ValueError) as e:
+            logging.warning(f"Could not write lock info: {e}")
+
+    def _record_nextflow_pid(self, pid: int) -> None:
+        """Add the pipeline's PID to the held lock, once it is known.
+
+        The PID exists only after the launch thread's Popen, which is after
+        the lock is taken, so the monitor loop records it on its first poll
+        that sees one. A GUI that dies afterwards leaves a lock that names
+        the process still writing the folder.
+        """
+        if not self._lock_fd or self._lock_info.get("nextflow_pid") == pid:
+            return
+        self._lock_info["nextflow_pid"] = pid
+        self._lock_info["nextflow_started_at"] = datetime.now().isoformat()
+        self._write_lock_info()
+
+    @classmethod
+    def read_orphan_run(cls, results_dir: Optional[str]) -> Optional[Dict[str, Any]]:
+        """A pipeline still running in ``results_dir`` that no live GUI owns.
+
+        Returns the lock's record (``nextflow_pid``, ``acquired_at``,
+        ``nextflow_started_at``, ``user``, ``hostname``, ``lock_file``)
+        when the lock names a Nextflow PID that is alive and the GUI that
+        took the lock is not, or is not this process. None otherwise:
+        no lock, no PID recorded, the pipeline finished, or the lock
+        belongs to this very process.
+        """
+        if not results_dir:
+            return None
+        lock_file = os.path.join(results_dir, ".nanometa.lock")
+        try:
+            with open(lock_file, "r") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        nf_pid = data.get("nextflow_pid")
+        try:
+            nf_pid = int(nf_pid)
+        except (TypeError, ValueError):
+            return None
+        if nf_pid <= 0 or not cls._process_exists(nf_pid):
+            return None
+        if data.get("pid") == os.getpid():
+            return None
+        record = {k: data.get(k) for k in (
+            "nextflow_pid", "nextflow_started_at", "acquired_at", "user",
+            "hostname", "pid",
+        )}
+        record["nextflow_pid"] = nf_pid
+        record["results_dir"] = results_dir
+        record["lock_file"] = lock_file
+        return record
+
+    @staticmethod
+    def _orphan_message(orphan: Dict[str, Any]) -> str:
+        started = orphan.get("nextflow_started_at") or orphan.get("acquired_at") or "unknown time"
+        return (
+            "A pipeline started by an earlier Nanometa Live session is still "
+            f"running in {orphan['results_dir']} (Nextflow PID "
+            f"{orphan['nextflow_pid']}, started {started}). Its results keep "
+            "arriving in that folder but this session is not attached to it. "
+            "Wait for it to finish, or stop it first with: "
+            f"kill {orphan['nextflow_pid']}"
+        )
 
     def _release_lock(self) -> None:
         """
@@ -1171,6 +1273,15 @@ class BackendManager:
                     self.config.get("sample_handling"), root_files, dirs_with_reads,
                 )
 
+            # Free space on the results volume, same cadence as the file
+            # count (field audit 2026-10-28, M3). The readiness floor only
+            # runs at Start; a 24-barcode overnight run fills a laptop SSD
+            # after it.
+            from nanometa_live.core.utils.disk_space import free_gb, low_disk_message
+            free = free_gb(self._lock_target_dir())
+            self.status["disk_free_gb"] = None if free is None else round(free, 1)
+            self.status["disk_low"] = low_disk_message(free)
+
             # Update status with waiting files
             # Processed files comes from workflow_manager status
             self.status["files_waiting"] = waiting_files
@@ -1224,6 +1335,9 @@ class BackendManager:
             try:
                 # Get workflow manager status (also drives progress tracking)
                 workflow_status = self.workflow_manager.get_status()
+                nf_pid = workflow_status.get("nextflow_pid")
+                if nf_pid:
+                    self._record_nextflow_pid(int(nf_pid))
 
                 # Progress signal: tasks running now, or the cumulative finished
                 # (completed + failed) count advanced since the last poll. Either
@@ -1386,6 +1500,19 @@ class BackendManager:
             self.status["pipeline_status"] = "completed"
             self.status["running"] = False
             logging.info("Pipeline completed successfully")
+            self._record_final_status()
+            return True
+
+        if exit_code == 0:
+            # Nextflow exited cleanly without running a task: a real-time
+            # run whose timer fired before any file arrived, or an input
+            # folder that held nothing to classify. Not a crash (field audit
+            # 2026-10-28, M2); the header says what happened.
+            self.status["pipeline_status"] = "completed"
+            self.status["running"] = False
+            self.status["completion_note"] = (
+                "no task ran - no input file reached the pipeline")
+            logging.warning("Pipeline completed without running any task")
             self._record_final_status()
             return True
 

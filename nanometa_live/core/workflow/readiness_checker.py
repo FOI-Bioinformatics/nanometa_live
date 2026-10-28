@@ -65,6 +65,23 @@ def _database_on_removable_volume(db_path: str, system: Optional[str] = None) ->
     return False
 
 
+# Headroom the OS, the Nextflow JVM and the dashboard need beside the
+# database; the same figure parameter_mapping subtracts when it sends the
+# host's memory ceiling. Above KRAKEN_DB_MEMORY_WARN_SHARE of RAM the
+# database fits only through the page cache (parameter_mapping withholds
+# the per-task floor there for the same reason).
+KRAKEN_DB_MEMORY_HEADROOM_GB = 2
+KRAKEN_DB_MEMORY_WARN_SHARE = 0.6
+
+
+def _host_memory_bytes() -> Optional[int]:
+    try:
+        import psutil
+        return int(psutil.virtual_memory().total)
+    except Exception:
+        return None
+
+
 class Severity(str, Enum):
     """Severity level for readiness checks."""
     CRITICAL = "critical"
@@ -80,6 +97,63 @@ class CheckResult:
     severity: Severity
     message: str
     details: Optional[str] = None
+
+
+def _database_memory_verdict(hash_bytes: int, total: int, mmap: bool) -> CheckResult:
+    """The Database Memory row for a measured hash and host (pure)."""
+    from nanometa_live.core.config.parameter_mapping import (
+        KRAKEN2_REQUEST_HEADROOM_GB,
+    )
+    gib = 1024 ** 3
+    hash_gb = hash_bytes / gib
+    total_gb = total / gib
+    usable_gb = max(0.0, total_gb - KRAKEN_DB_MEMORY_HEADROOM_GB)
+    share = hash_bytes / total
+    # Without memory mapping a task allocates the database privately;
+    # the request the launch sends is hash + KRAKEN2_REQUEST_HEADROOM_GB.
+    full_load_gb = hash_gb + KRAKEN2_REQUEST_HEADROOM_GB
+    figures = f"database {hash_gb:.1f} GB, memory {total_gb:.0f} GB"
+
+    if hash_gb > usable_gb:
+        return CheckResult(
+            "Database Memory", False, Severity.CRITICAL,
+            f"The Kraken2 database ({hash_gb:.1f} GB) is larger than this "
+            f"machine's memory ({total_gb:.0f} GB). The classifier cannot "
+            "hold it and the run fails at its first task.",
+            details=(
+                "Use a smaller database (a field build or a MiniKraken-class "
+                "index) or a machine with more memory."
+            ),
+        )
+    if not mmap and full_load_gb > usable_gb:
+        return CheckResult(
+            "Database Memory", False, Severity.CRITICAL,
+            f"Memory mapping is off, so every classifier task loads the "
+            f"whole database privately ({full_load_gb:.0f} GB with headroom) "
+            f"and this machine has {total_gb:.0f} GB.",
+            details=(
+                "Remove kraken_memory_mapping: false from the config (memory "
+                "mapping shares the database through the page cache), or use "
+                "a smaller database."
+            ),
+        )
+    if share > KRAKEN_DB_MEMORY_WARN_SHARE:
+        return CheckResult(
+            "Database Memory", False, Severity.WARNING,
+            f"The database takes {share:.0%} of this machine's memory "
+            f"({figures}). It fits only with memory mapping, the "
+            "classifier runs one task at a time, and a retry without "
+            "memory mapping will not fit.",
+            details=(
+                "Expect slower classification. A database under "
+                f"{KRAKEN_DB_MEMORY_WARN_SHARE:.0%} of memory leaves room for "
+                "parallel classifier tasks."
+            ),
+        )
+    return CheckResult(
+        "Database Memory", True, Severity.WARNING,
+        f"Database fits in memory ({figures}, {share:.0%})",
+    )
 
 
 @dataclass
@@ -173,6 +247,7 @@ class ReadinessChecker:
         # === Data checks (critical) ===
         report.checks.append(self._check_kraken_db(config))
         report.checks.append(self._check_kraken_db_location(config))
+        report.checks.append(self._check_kraken_db_memory(config))
         report.checks.append(self._check_db_index(config, home))
         report.checks.append(self._check_taxid_mappings(config, home, active_watchlist))
 
@@ -307,6 +382,48 @@ class ReadinessChecker:
             "Database Location", True, Severity.WARNING,
             "Database is on local storage"
         )
+
+    def _check_kraken_db_memory(self, config: Dict[str, Any]) -> CheckResult:
+        """Compare the database to this machine's memory before a launch.
+
+        The GUI sizes the Kraken2 request from ``hash.k2d`` and nothing
+        compared that size to the laptop, so a database larger than RAM
+        passed every check and the run aborted at the first classifier
+        task (field audit 2026-10-28, H1). Three answers:
+
+        - CRITICAL when the hash cannot fit in memory at all, or when
+          memory mapping is off and the full private load cannot fit.
+        - WARNING when it fits only with memory mapping and little room:
+          the classifier runs one task at a time, and the pipeline's
+          no-mmap retry (its answer to a segfault) will not fit.
+        - PASS otherwise, with the figures, so the operator sees the margin.
+
+        Unset or unreadable paths pass as INFO: they are the Kraken2
+        Database check's finding.
+        """
+        db_path = config.get("kraken_db", "")
+        if not db_path or not Path(db_path).is_dir():
+            return CheckResult(
+                "Database Memory", True, Severity.INFO,
+                "Not applicable (no database directory)"
+            )
+        try:
+            hash_bytes = (Path(db_path) / "hash.k2d").stat().st_size
+        except OSError:
+            return CheckResult(
+                "Database Memory", True, Severity.INFO,
+                "Not applicable (hash.k2d not readable)"
+            )
+        total = _host_memory_bytes()
+        if not total:
+            return CheckResult(
+                "Database Memory", True, Severity.INFO,
+                "Could not determine this machine's memory"
+            )
+        mmap = True
+        if "kraken_memory_mapping" in config:
+            mmap = bool(config["kraken_memory_mapping"])
+        return _database_memory_verdict(hash_bytes, total, mmap)
 
     def _check_db_index(self, config: Dict[str, Any], home: Path) -> CheckResult:
         db_path = config.get("kraken_db", "")
@@ -816,9 +933,10 @@ class ReadinessChecker:
                 "Could not determine disk space (path does not exist)"
             )
         try:
+            from nanometa_live.core.utils.disk_space import LOW_DISK_FLOOR_GB
             usage = shutil.disk_usage(str(check_path))
             free_gb = usage.free / (1024 ** 3)
-            if free_gb < 5:
+            if free_gb < LOW_DISK_FLOOR_GB:
                 # Round 3: below the hard floor the check FAILS and gates
                 # Start. A run launched onto a nearly full volume hits
                 # ENOSPC mid-run, which truncates reports -- the compound
@@ -830,7 +948,7 @@ class ReadinessChecker:
                     "Disk Space", False,
                     Severity.WARNING if allow else Severity.CRITICAL,
                     f"Only {free_gb:.1f} GB free in the output volume -- "
-                    "below the 5 GB floor for a run",
+                    f"below the {LOW_DISK_FLOOR_GB} GB floor for a run",
                     details=(
                         "Free space or choose another results folder. To "
                         "start anyway, export NANOMETA_ALLOW_LOW_DISK=1."

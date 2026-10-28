@@ -37,6 +37,52 @@ def _mtime_or_zero(path: str) -> float:
         return 0.0
 
 
+def parse_pipeline_source(
+    source: str, default_repo: str = "foi-bioinformatics/nanometanf",
+) -> Tuple[str, Optional[str]]:
+    """Translate a ``pipeline_source`` config value into what ``nextflow run``
+    takes: ``(project, revision)``.
+
+    ``remote:<branch>`` and the bare ``master`` / ``dev`` forms name the
+    upstream repository plus a ``-r`` revision; ``local:<path>`` and bare
+    paths are the project with no revision. Every launcher must go through
+    this: the on-demand validator placed the config value in argv verbatim,
+    so a default install ran ``nextflow run remote:dev``, which is not a
+    project name, and on-demand validation failed on every default install
+    (field audit 2026-10-28, H4).
+    """
+    source = (source or "").strip()
+
+    if source.startswith("remote:"):
+        # Remote repository with branch specification
+        branch = source.split(":", 1)[1] if ":" in source else "master"
+        return default_repo, branch or "master"
+
+    if source.startswith("local:"):
+        # Local filesystem path with explicit prefix - strip the prefix
+        local_path = source.split(":", 1)[1]
+        if not os.path.isdir(local_path):
+            logging.warning(
+                f"Local pipeline path '{local_path}' not found. "
+                f"Attempting to use anyway."
+            )
+        return local_path, None
+
+    if os.path.isdir(source):
+        # Local filesystem path (no prefix)
+        return source, None
+
+    if source in ("master", "dev"):
+        return default_repo, source
+
+    # Assume it's a local path (may not exist yet)
+    logging.warning(
+        f"Pipeline source '{source}' not found as directory. "
+        f"Treating as local path."
+    )
+    return source, None
+
+
 class NextflowManager:
     """Manages Nextflow pipeline execution and monitoring for nanometanf."""
 
@@ -325,39 +371,7 @@ class NextflowManager:
             - pipeline_path: GitHub repo name or local filesystem path
             - revision: Git branch/tag (e.g., 'master', 'dev') or None for local
         """
-        source = self.pipeline_source
-
-        if source.startswith("remote:"):
-            # Remote repository with branch specification
-            branch = source.split(":", 1)[1] if ":" in source else "master"
-            return self.DEFAULT_REMOTE_REPO, branch
-
-        elif source.startswith("local:"):
-            # Local filesystem path with explicit prefix - strip the prefix
-            local_path = source.split(":", 1)[1]
-            if os.path.isdir(local_path):
-                return local_path, None
-            else:
-                logging.warning(
-                    f"Local pipeline path '{local_path}' not found. "
-                    f"Attempting to use anyway."
-                )
-                return local_path, None
-
-        elif os.path.isdir(source):
-            # Local filesystem path (no prefix)
-            return source, None
-
-        elif source in ("master", "dev"):
-            return self.DEFAULT_REMOTE_REPO, source
-
-        else:
-            # Assume it's a local path (may not exist yet)
-            logging.warning(
-                f"Pipeline source '{source}' not found as directory. "
-                f"Treating as local path."
-            )
-            return source, None
+        return parse_pipeline_source(self.pipeline_source, self.DEFAULT_REMOTE_REPO)
 
     def set_pipeline_source(self, source: str) -> None:
         """
@@ -900,11 +914,59 @@ class NextflowManager:
                 if not env.get("NXF_HOME"):
                     env["NXF_HOME"] = nxf_home
                     logging.info(f"NXF_HOME set to: {nxf_home}")
+                    NextflowManager._seed_nextflow_home(nxf_home)
                 if not env.get("NXF_TEMP"):
                     env["NXF_TEMP"] = nxf_temp
                     logging.info(f"NXF_TEMP set to: {nxf_temp}")
 
         return env
+
+    # What the get.nextflow.io launcher caches under NXF_HOME and fetches
+    # from the network when absent: the runtime jar for the launcher's
+    # version (framework/<version>/) and its dependency cache (capsule/).
+    _NXF_HOME_SEED_DIRS = ("framework", "capsule")
+
+    @staticmethod
+    def _default_nextflow_home() -> Path:
+        return Path(os.path.expanduser("~")) / ".nextflow"
+
+    @classmethod
+    def _seed_nextflow_home(cls, nxf_home: str) -> List[str]:
+        """Point a fresh per-run NXF_HOME at the launcher's cached runtime.
+
+        Every run gets its own NXF_HOME under the results folder (so a
+        read-only home directory cannot break a launch). The get.nextflow.io
+        launcher keeps its runtime jar under ``$NXF_HOME/framework/<ver>/``
+        and downloads it when the directory is empty -- which a fresh
+        results folder always is -- so an air-gapped field machine failed at
+        the first Start into a new folder before any process ran, and
+        ``NXF_OFFLINE`` does not stop that fetch (field audit 2026-10-28,
+        H6). The bioconda launcher ships its jar beside the script and never
+        looks here, so for it this is a no-op. Returns the names it linked.
+        """
+        linked: List[str] = []
+        source = cls._default_nextflow_home()
+        if not source.is_dir():
+            return linked
+        try:
+            os.makedirs(nxf_home, exist_ok=True)
+        except OSError:
+            return linked
+        for name in cls._NXF_HOME_SEED_DIRS:
+            src = source / name
+            dst = Path(nxf_home) / name
+            if not src.is_dir() or os.path.lexists(dst):
+                continue
+            try:
+                os.symlink(str(src), str(dst))
+                linked.append(name)
+            except OSError as exc:
+                logging.debug(f"Could not seed {dst} from {src}: {exc}")
+        if linked:
+            logging.info(
+                f"Seeded NXF_HOME {nxf_home} from {source}: {', '.join(linked)}"
+            )
+        return linked
 
     def _run_workflow(self, cmd: List[str], config: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -944,6 +1006,10 @@ class NextflowManager:
 
                 # Wait for completion
                 exit_code = self.process.wait()
+                # The monitor thread may be mid-sleep; count the last tasks
+                # here too so the exit status and the task counts the
+                # backend reads together are from the same final trace.
+                self.status.update(self._parse_trace_file(force=True))
                 # Record it before any error handling: BackendManager uses it
                 # to tell an isolated (ignored) task failure from a run
                 # failure -- Nextflow exits 0 for the former.
@@ -1026,6 +1092,9 @@ class NextflowManager:
                 # Check if process is still running
                 if self.process.poll() is not None:
                     logging.info("Nextflow process has terminated")
+                    # Nothing writes the trace any more: read it one last
+                    # time, past the stability window.
+                    self.status.update(self._parse_trace_file(force=True))
                     self.running = False
                     break
 
@@ -1053,9 +1122,16 @@ class NextflowManager:
 
         logging.info("Nextflow trace monitor stopped")
 
-    def _parse_trace_file(self) -> Dict[str, Any]:
+    def _parse_trace_file(self, force: bool = False) -> Dict[str, Any]:
         """
         Parse Nextflow trace file for process execution status.
+
+        ``force`` reads the file even inside its 1 s stability window: the
+        final read after Nextflow exits, when nothing can be writing it any
+        more. Without it the tasks that finished in the last poll window
+        (the final aggregator, a last isolated failure) were never counted
+        and a run could render Complete over an uncounted failure (field
+        audit 2026-10-28, M2).
 
         Returns:
             Dictionary with process counts and stage-level information
@@ -1070,7 +1146,7 @@ class NextflowManager:
             try:
                 stat = os.stat(trace_path)
                 age = time.time() - stat.st_mtime
-                if age < 1.0:
+                if age < 1.0 and not force:
                     return self._last_trace_status or {}
             except OSError:
                 return {}
@@ -1339,6 +1415,13 @@ class NextflowManager:
                 (r"singularity.*not found", "Singularity not found"),
                 (r"Cannot pull container", "Failed to pull container image"),
                 (r"Unable to pull", "Failed to pull container image"),
+                # The local executor refuses a task whose memory request is
+                # above physical RAM and aborts the run; a Kraken2 request
+                # sized from a database larger than the laptop produced
+                # exactly this, and the header showed the last log line
+                # instead (field audit 2026-10-28, H1).
+                (r"exceeds available memory", "Task needs more memory than this machine has"),
+                (r"exceeds available CPUs", "Task needs more CPUs than this machine has"),
                 # Process errors
                 (r"Error executing process", "Process execution failed"),
                 (r"Command exit status", "Command failed"),

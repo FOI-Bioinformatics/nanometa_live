@@ -8,6 +8,94 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Four places where the dashboard rendered less than it knew (field audit
+  2026-10-28, M1, M2, M3, M8). A loader exception during a run showed a
+  calm grey STANDBY; it is now the amber RESULTS UNREADABLE state with the
+  error named. The final execution trace is re-read after Nextflow exits,
+  so tasks that finished in the last poll window (the final aggregator, a
+  last isolated failure) are counted, and a clean exit without a single
+  task (a real-time timer that fired before any file arrived) reads
+  "Complete - no task ran" instead of PIPELINE ERROR. The backend polls
+  free space on the results volume every tick and the header and verdict
+  subtitle say so below the 5 GB floor, since a full disk ends a run
+  COMPLETE over truncated reports. And the first polls after boot stay at
+  the active cadence, so a dashboard opened on existing results shows them
+  within seconds rather than after the 60 s idle interval (79 s measured).
+- The field install is documented, pinned and checked. `nanometa_live_env.yml`
+  omitted six runtime requirements (dash-ag-grid, diskcache, psutil,
+  multiprocess, dill, openpyxl), so an environment built from it failed at
+  import and `pip install .` then reached PyPI, on a machine with no
+  network; the file now carries every requirement at the same floor, with
+  a test keeping it in step with `requirements.txt`. A Start into a new
+  results folder gave the get.nextflow.io launcher a fresh `NXF_HOME` with
+  no runtime jar, which it downloads and `NXF_OFFLINE` does not prevent;
+  the launch now seeds the per-run home from `~/.nextflow` and
+  `nanometa-prepare doctor` reports whether the runtime is cached. The
+  Operator Guide gained the install steps the bundle does not cover and a
+  pre-departure checklist ending with one real air-gapped run.
+- On-demand validation launches on a default install. The launcher placed
+  the configured `pipeline_source` in the command verbatim, so the default
+  `remote:dev` became `nextflow run remote:dev`, not a project name, and
+  every on-demand validation ended with "did not return a result". The
+  launch now goes through the same translation as Start Analysis
+  (`parse_pipeline_source`: repository plus `-r` revision, or a local
+  checkout); the test asserts the command line.
+- Start Analysis now refuses a run that fails a CRITICAL readiness check,
+  and names the rows. The checklist looked like a gate and was not one: the
+  header button's disabled attribute was the only barrier, the Preparation
+  tab's Start button proxied past it, and the Start callback never read
+  the readiness Store, so "Not Ready, 10/25 checks passed" sat above an
+  enabled Start Analysis button. The refusal is server-side on every click
+  (`readiness_blocks_start`); a readiness state never computed refuses too.
+  `start_without_readiness: true` in the configuration, or
+  `NANOMETA_ALLOW_NOT_READY=1`, starts anyway.
+- A pipeline that outlives the dashboard is no longer invisible. Nextflow
+  runs in its own session and survives a GUI crash; the lock recorded only
+  the GUI's PID, so the next launch called the lock stale and started a
+  second pipeline into the same results and work folders. The lock now
+  records the pipeline's PID once known, a launch into a folder whose
+  pipeline still lives is refused with that PID and how to stop it, a
+  startup toast names such a run, and the lock is opened without
+  truncating the holder's record (a second instance used to report an
+  empty "Lock info").
+- **The memory ceiling never rises above `--max_memory`.** `conf/base.config`
+  raises `resourceLimits.memory` to `kraken2_memory_gb` so an operator's
+  explicit PlusPFP size is honoured, and that also raised it above a
+  laptop's RAM when the request was sized from a database larger than the
+  machine (Nanometa Live sends `hash.k2d` + 4 GB); the local executor
+  refuses a request above physical memory and aborts the run. The ceiling
+  is now `min(max(16, kraken2_memory_gb), max_memory)`, and the three
+  Kraken2 processes clamp their no-mmap retry (`full * attempt`, which
+  asked for twice the RAM exactly when a segfault had made a retry
+  necessary) to the same param. The 128 GB default leaves every existing
+  invocation unchanged; Nanometa Live sends the host's own ceiling.
+  Verified in a stub run: a 29 GB request under `--max_memory 12.GB` is
+  traced at 12 GB.
+
+- A Kraken2 database larger than the laptop no longer aborts the run at its
+  first classifier task. The launch sized the request from `hash.k2d` and
+  nothing compared it to the machine; nanometanf raised its memory ceiling
+  to the request, and Nextflow's local executor refuses a request above
+  physical memory with a message the header did not recognise. The launch
+  now sends this machine's memory ceiling (`max_memory`, total minus 2 GB),
+  which nanometanf clamps to; the readiness checklist gained a "Database
+  Memory" row that is CRITICAL when the database cannot fit in memory and
+  WARNING when it fits only through the page cache; and the header names
+  the executor's refusal when it does happen.
+- A pre-warmed conda bundle no longer arrives with every byte-compiled
+  Python module corrupted. Import relocates the recorded build prefix with
+  a NUL-padded rewrite meant for C string tables, and a `.pyc` is marshal
+  data with length-prefixed strings: the bytes after the path shifted, the
+  module failed at first import with "bad marshal data", and relocation
+  reported zero failures. Conda byte-compiles every noarch package with the
+  env's absolute prefix, so every Python-based pipeline process (the
+  canonical writers, the Kraken2 merger and report generator, taxpasta,
+  multiqc, nanoplot) was dead on arrival on an air-gapped machine.
+  Relocation now removes a `.pyc` that carries the old prefix (Python
+  regenerates it from source) and counts the removals; the bundle-deploy
+  workflow gained a job that builds a real Python environment under a
+  padded prefix, moves it, relocates it and imports a byte-compiled module
+  with the relocated interpreter.
 - A finished batch run is no longer described as "still classifying". A
   chunk whose reads the quality filter removes entirely never reaches the
   classifier and gets no per-batch report, so the chunk plan was never

@@ -160,6 +160,7 @@ def relocate_conda_cache(cache_dir: Path, old_prefix: str) -> Dict[str, Any]:
         "text_rewritten": 0,
         "binary_patched": 0,
         "symlinks_retargeted": 0,
+        "pyc_removed": 0,
         "failures": [],
     }
     new_prefix = str(cache_dir)
@@ -170,57 +171,78 @@ def relocate_conda_cache(cache_dir: Path, old_prefix: str) -> Dict[str, Any]:
 
     for path in sorted(cache_dir.rglob("*")):
         if path.is_symlink():
-            try:
-                target = os.readlink(str(path))
-            except OSError:
-                continue
-            if target.startswith(old_prefix):
-                new_target = new_prefix + target[len(old_prefix):]
-                try:
-                    path.unlink()
-                    os.symlink(new_target, str(path))
-                    stats["symlinks_retargeted"] += 1
-                except OSError as exc:
-                    logger.warning(
-                        "Could not retarget symlink %s: %s", path, exc
-                    )
-                    stats["failures"].append(
-                        str(path.relative_to(cache_dir))
-                    )
-            continue
-        if not path.is_file():
-            continue
-        stats["files_scanned"] += 1
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            logger.warning("Could not read %s during relocation: %s", path, exc)
-            stats["failures"].append(str(path.relative_to(cache_dir)))
-            continue
-        if old_b not in data:
-            continue
-        if b"\x00" in data:
-            patched = _patch_binary(data, old_b, new_b)
-            if patched is None:
-                stats["failures"].append(str(path.relative_to(cache_dir)))
-                continue
-            _rewrite_in_place(path, patched)
-            stats["binary_patched"] += 1
-            if _is_macho(patched):
-                if _resign_macho(path):
-                    stats["binaries_resigned"] = (
-                        stats.get("binaries_resigned", 0) + 1
-                    )
-                else:
-                    # An unsigned patched Mach-O is SIGKILLed at exec on
-                    # Apple Silicon -- that env is unusable.
-                    stats["failures"].append(
-                        str(path.relative_to(cache_dir)) + " (codesign failed)"
-                    )
-        else:
-            _rewrite_in_place(path, data.replace(old_b, new_b))
-            stats["text_rewritten"] += 1
+            _retarget_symlink(path, old_prefix, new_prefix, cache_dir, stats)
+        elif path.is_file():
+            stats["files_scanned"] += 1
+            _relocate_file(path, old_b, new_b, cache_dir, stats)
     return stats
+
+
+def _retarget_symlink(path: Path, old_prefix: str, new_prefix: str,
+                      cache_dir: Path, stats: Dict[str, Any]) -> None:
+    try:
+        target = os.readlink(str(path))
+    except OSError:
+        return
+    if not target.startswith(old_prefix):
+        return
+    new_target = new_prefix + target[len(old_prefix):]
+    try:
+        path.unlink()
+        os.symlink(new_target, str(path))
+        stats["symlinks_retargeted"] += 1
+    except OSError as exc:
+        logger.warning("Could not retarget symlink %s: %s", path, exc)
+        stats["failures"].append(str(path.relative_to(cache_dir)))
+
+
+def _relocate_file(path: Path, old_b: bytes, new_b: bytes,
+                   cache_dir: Path, stats: Dict[str, Any]) -> None:
+    """Rewrite one regular file, or drop it when a rewrite cannot be safe."""
+    rel = str(path.relative_to(cache_dir))
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        logger.warning("Could not read %s during relocation: %s", path, exc)
+        stats["failures"].append(rel)
+        return
+    if old_b not in data:
+        return
+    if path.suffix == ".pyc":
+        # A .pyc is marshal data: its strings (co_filename holds the
+        # absolute build path) are length-prefixed, not NUL-terminated,
+        # so the NUL-padded rewrite below shifts every byte after the
+        # path and the module fails at import with "bad marshal data"
+        # -- while this function reported zero failures (field audit,
+        # 2026-10-28, C1). Conda byte-compiles noarch packages with the
+        # env's absolute prefix at install time, so every Python-based
+        # pipeline process was dead on arrival. Python regenerates the
+        # file from source on first import; a missing .pyc costs one
+        # compile, a patched one costs the env.
+        try:
+            path.unlink()
+            stats["pyc_removed"] += 1
+        except OSError as exc:
+            logger.warning("Could not remove %s during relocation: %s", path, exc)
+            stats["failures"].append(rel)
+        return
+    if b"\x00" not in data:
+        _rewrite_in_place(path, data.replace(old_b, new_b))
+        stats["text_rewritten"] += 1
+        return
+    patched = _patch_binary(data, old_b, new_b)
+    if patched is None:
+        stats["failures"].append(rel)
+        return
+    _rewrite_in_place(path, patched)
+    stats["binary_patched"] += 1
+    if _is_macho(patched):
+        if _resign_macho(path):
+            stats["binaries_resigned"] = stats.get("binaries_resigned", 0) + 1
+        else:
+            # An unsigned patched Mach-O is SIGKILLed at exec on
+            # Apple Silicon -- that env is unusable.
+            stats["failures"].append(rel + " (codesign failed)")
 
 
 def make_symlinks_relative(root: Path) -> Dict[str, Any]:

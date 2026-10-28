@@ -366,6 +366,8 @@ def register_dashboard_callbacks(app: Dash):
         )
 
         kraken_has_data = False
+        load_failed = False
+        load_error: Optional[str] = None
         dangerous: List[Dict[str, Any]] = []
         subthreshold: List[Dict[str, Any]] = []
         n_watched = 0
@@ -412,8 +414,12 @@ def register_dashboard_callbacks(app: Dash):
                     kraken_has_data = True
             except Exception as e:
                 logger.error(f"Error updating verdict banner: {e}", exc_info=True)
-                # A load failure falls back to STANDBY, matching the original.
-                main_dir_available = False
+                # A load failure is its own state, RESULTS UNREADABLE: it
+                # used to fall back to STANDBY, which rendered a running run
+                # whose report could not be parsed as "nothing to do"
+                # (field audit 2026-10-28, M1).
+                load_failed = True
+                load_error = f"{type(e).__name__}: {str(e)[:160]}"
                 kraken_has_data = False
                 dangerous = []
                 subthreshold = []
@@ -449,6 +455,11 @@ def register_dashboard_callbacks(app: Dash):
             # the verdict's attribution names the pipeline's grouping.
             input_layout_mismatch=(status or {}).get("input_layout_mismatch"),
             batch_progress_clause=_batch_progress_verdict_clause(main_dir),
+            # Free space on the results volume, polled by the backend each
+            # tick (field audit 2026-10-28, M3).
+            disk_low=(status or {}).get("disk_low"),
+            load_failed=load_failed,
+            load_error=load_error,
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes

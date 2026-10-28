@@ -310,3 +310,52 @@ class TestValidateViaNanometanfProcessGroupIsolation:
         assert result is None
         calls = [c.args[1] for c in mock_killpg.call_args_list]
         assert calls == [signal.SIGTERM, signal.SIGKILL]
+
+
+class TestLaunchArgvResolvesThePipelineSource:
+    """Field audit 2026-10-28, H4: the on-demand launcher placed the config
+    value in argv verbatim, so a default install ran ``nextflow run
+    remote:dev`` -- not a project name -- and every on-demand validation
+    failed with "did not return a result". The earlier test fed exactly
+    ``remote:dev`` into a mocked Popen and never looked at argv."""
+
+    def _validator(self, tmp_path):
+        v = OnDemandValidator(
+            results_dir=str(tmp_path / "results"),
+            input_dir=str(tmp_path / "input"),
+            cache_dir=str(tmp_path / "cache"),
+            genome_manager=MagicMock(),
+        )
+        (tmp_path / "input").mkdir(parents=True, exist_ok=True)
+        (v.genomes_dir / "1392.fasta").write_text(">x\nACGT\n")
+        return v
+
+    def _argv(self, tmp_path, config):
+        v = self._validator(tmp_path)
+        mock_proc = MagicMock(pid=4321, returncode=0)
+        mock_proc.communicate.return_value = ("", "")
+        with patch(
+            "nanometa_live.core.workflow.on_demand_validator.subprocess.Popen",
+            return_value=mock_proc,
+        ) as mock_popen, patch(
+            "nanometa_live.core.parsers.blast_validation_parser.ValidationParser.get_validation_results",
+            return_value=[],
+        ):
+            v.validate_via_nanometanf(1392, "B. anthracis", "barcode01", config=config)
+        args, _ = mock_popen.call_args
+        return list(args[0])
+
+    def test_remote_dev_becomes_repo_and_revision(self, tmp_path):
+        argv = self._argv(tmp_path, {"pipeline_source": "remote:dev", "pipeline_profile": "conda"})
+        assert argv[:5] == ["nextflow", "run", "foi-bioinformatics/nanometanf", "-r", "dev"]
+        assert "remote:dev" not in argv
+
+    def test_local_checkout_has_no_revision(self, tmp_path):
+        checkout = tmp_path / "nanometanf"; checkout.mkdir()
+        argv = self._argv(tmp_path, {"pipeline_source": str(checkout), "pipeline_profile": "conda"})
+        assert argv[:3] == ["nextflow", "run", str(checkout)]
+        assert "-r" not in argv
+
+    def test_legacy_branch_keys_resolve_too(self, tmp_path):
+        argv = self._argv(tmp_path, {"pipeline_source_type": "remote", "pipeline_branch": "master"})
+        assert argv[:5] == ["nextflow", "run", "foi-bioinformatics/nanometanf", "-r", "master"]

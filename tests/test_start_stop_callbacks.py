@@ -22,6 +22,10 @@ from nanometa_live.app.callbacks import register_core_callbacks
 # Output tuple indices for readability.
 NOTIF, CONFIG, STOP_MODAL, COLLISION_MODAL, COLLISION_BODY, PENDING, STATUS = range(7)
 
+# A computed readiness Store with nothing failing: the gate lets the click
+# through. Every launch-path test passes it explicitly.
+READY = {"ready": True, "checks": [{"name": "Kraken2 Database", "passed": True, "severity": "critical", "message": "ok"}]}
+
 
 @pytest.fixture
 def start_stop():
@@ -34,17 +38,17 @@ def start_stop():
 class TestStartOrPromptStop:
     def test_no_clicks_is_all_noop(self, start_stop):
         fn, _ = start_stop
-        result = fn(0, {"main_dir": "/x"}, {"running": False})
+        result = fn(0, {"main_dir": "/x"}, {"running": False}, READY)
         assert all(r is no_update for r in result)
 
     def test_running_opens_stop_modal(self, start_stop):
         fn, _ = start_stop
-        result = fn(1, {"main_dir": "/x"}, {"running": True})
+        result = fn(1, {"main_dir": "/x"}, {"running": True}, READY)
         assert result[STOP_MODAL] is True
 
     def test_missing_config_errors(self, start_stop):
         fn, _ = start_stop
-        result = fn(1, None, {"running": False})
+        result = fn(1, None, {"running": False}, READY)
         assert result[NOTIF]["color"] == "danger"
 
     def test_clean_outdir_starts_run(self, start_stop):
@@ -52,7 +56,7 @@ class TestStartOrPromptStop:
         backend.detect_existing_results.return_value = []
         backend.transition_in_progress.return_value = False
         backend.start_async.return_value = (True, "Starting in background")
-        result = fn(1, {"results_dir_override": "/out"}, {"running": False})
+        result = fn(1, {"results_dir_override": "/out"}, {"running": False}, READY)
         backend.start_async.assert_called_once()
         assert result[NOTIF]["title"] == "Starting Analysis"
         # Optimistic backend-status flips running True on success.
@@ -64,7 +68,7 @@ class TestStartOrPromptStop:
         backend.detect_existing_results.return_value = []
         backend.transition_in_progress.return_value = False
         backend.start_async.return_value = (False, "conda env broken")
-        result = fn(1, {"results_dir_override": "/out"}, {"running": False})
+        result = fn(1, {"results_dir_override": "/out"}, {"running": False}, READY)
         assert result[NOTIF]["title"] == "Error"
         assert result[NOTIF]["color"] == "danger"
         assert result[STATUS] is no_update
@@ -73,7 +77,7 @@ class TestStartOrPromptStop:
         fn, backend = start_stop
         backend.detect_existing_results.return_value = ["kraken2", "fastp"]
         backend.fingerprint_matches.return_value = True
-        result = fn(1, {"results_dir_override": "/out"}, {"running": False})
+        result = fn(1, {"results_dir_override": "/out"}, {"running": False}, READY)
         assert result[COLLISION_MODAL] is True
         assert result[PENDING]["outdir"] == "/out"
         assert result[PENDING]["found"] == ["kraken2", "fastp"]

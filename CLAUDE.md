@@ -117,7 +117,19 @@ and dependencies stay dynamic (`nanometa_live.__version__` and
 
 `nanometa_live_env.yml` includes Nextflow (`>=26.04.0`) — without it the
 environment yields a working dashboard and a pipeline that fails the moment
-Start Analysis is pressed. `nanometa-prepare doctor` is the config-free
+Start Analysis is pressed. It must carry EVERY runtime requirement at the
+same floor as `requirements.txt` (`tests/test_env_yml_covers_requirements.py`
+is the fence): it is the documented offline install route, and six missing
+packages once left a field machine with an app that failed at import and a
+`pip install` that reached for PyPI (field audit 2026-10-28, H6). A GUI
+Start gives each run its own `NXF_HOME` under the results folder; the
+get.nextflow.io launcher keeps its runtime jar under
+`$NXF_HOME/framework/<ver>/` and downloads it when absent, which
+`NXF_OFFLINE` does not stop, so `_build_nextflow_env` seeds the fresh home
+by symlinking `framework/` and `capsule/` from `~/.nextflow`
+(`_seed_nextflow_home`), and the doctor's "Nextflow runtime cache" row says
+whether that cache exists. The bioconda launcher ships its jar and needs
+neither. `nanometa-prepare doctor` is the config-free
 post-install check (Python, Nextflow + floor, conda, container runtimes, data
 dirs); `nanometa-prepare check --config` is the run-specific one. Every CLI
 subcommand except `verify` calls `NanometaPaths.ensure_dirs()` before
@@ -475,6 +487,27 @@ override wins" resolver into dead code (the `min_perc_identity` pattern).
 The readiness checklist warns when `kraken_db` sits on a removable/network
 volume (mmap random access over USB is pathological; the content-derived
 `db_hash` makes a local copy free of re-preparation).
+
+**The request is compared to the machine, and the machine's ceiling travels
+with it** (field audit 2026-10-28, H1). nanometanf raises its
+`resourceLimits.memory` to the Kraken2 request so an explicit PlusPFP size is
+honoured, which also raised it above a laptop's RAM whenever the GUI sized
+the request from a database larger than the machine; Nextflow's local
+executor refuses a request above physical memory and aborts the run with
+"Process requirement exceeds available memory", which the header's log
+scanner did not recognise. Three guards: `_resolve_max_memory_gb` sends
+`--max_memory` as total RAM minus `HOST_MEMORY_HEADROOM_GB` (explicit config
+value wins), nanometanf clamps both its base ceiling and the classifier's
+no-mmap retry (`full * attempt`) to that param, and the readiness row
+"Database Memory" (`_check_kraken_db_memory`) is CRITICAL when `hash.k2d`
+cannot fit in RAM at all (or memory mapping is off and the private load
+cannot), WARNING above `KRAKEN_DB_MEMORY_WARN_SHARE` of RAM (fits only
+through the page cache; the retry will not). `KRAKEN2_REQUEST_HEADROOM_GB`
+(4) is the one definition of the "+4 GB" both sites use. nanometanf's `field`
+profile is deliberately NOT selected by the GUI: its `params` block forces
+`realtime_mode = true` and `skip_nanoplot`, and profile params outrank
+nothing the GUI omits, so a batch run would have been hijacked; the GUI sends
+the laptop budget itself instead.
 
 ### Parameter mapping (non-obvious renames)
 
@@ -1146,7 +1179,15 @@ Three concerns:
      restored path — text replace, NUL-padded in-place for binaries, symlink
      retarget (`core/workflow/conda_cache_utils.relocate_conda_cache`).
      Conda envs embed the build prefix in shebangs/binaries, so without this
-     every env fails exit-127 at first use. Absolute symlinks are made
+     every env fails exit-127 at first use. **A `.pyc` is marshal data, not a
+     C string table**: its strings are length-prefixed, so the NUL-padded
+     rewrite shifted every byte after `co_filename` and broke the module at
+     import while relocation reported zero failures (field audit 2026-10-28,
+     C1). Relocation deletes any `.pyc` carrying the old prefix instead
+     (`pyc_removed`); Python regenerates it. The bundle-deploy workflow's
+     `relocate-python-env` job imports a byte-compiled module from a
+     relocated real environment, which is the check the unit fixtures
+     (ELF-shaped blobs) could not make. Absolute symlinks are made
      relative at export (tarfile's `data` filter aborts on absolute link
      targets); import copies symlinks as symlinks. **Every patched Mach-O is
      ad-hoc re-signed** (`_resign_macho`, `/usr/bin/codesign -s -`): the byte
@@ -1413,6 +1454,46 @@ The GUI compensates: the sample selector marks samples present in
 from files on disk. Marked rather than hidden — hiding loses the fact that
 the barcode was attempted. The exported report carries the same
 attempted-but-no-output marking.
+
+**Start is gated on the server, and the lock knows the pipeline (field
+audit 2026-10-28, H5 and H3).** `start_or_prompt_stop` takes
+`State("readiness-state")` and refuses a launch through
+`app/utils/start_gate.readiness_blocks_start` when any CRITICAL row failed
+or the state was never computed; the header button's disabled attribute is
+a courtesy that the Preparation tab's proxy button and a stale Store walk
+past, and before this nothing else checked. `start_without_readiness` /
+`NANOMETA_ALLOW_NOT_READY=1` are the operator's override. The run lock
+(`.nanometa.lock`) records `nextflow_pid` once the monitor loop sees it
+(`_record_nextflow_pid`); `_acquire_lock` refuses while that process lives
+even if the GUI that took the lock is dead (it used to call the lock stale
+and start a second pipeline into the same outdir and work dir), the
+startup toast `warn_about_orphan_run_on_startup` names such a run, and the
+lock is opened `a+` so a second instance reads the holder's record instead
+of truncating it. Attaching to an orphan is not offered: the manager cannot
+adopt a subprocess handle it did not create. **Dash callback_map gotcha:**
+two callbacks with the same Output and the same Input set share a
+`callback_map` key and the later registration silently replaces the
+earlier one. The orphan toast therefore takes `results-dir-path` as its
+Input, not `app-config` like the missing-paths toast; tests select startup
+callbacks by function name for the same reason.
+
+**Four truthfulness gaps closed by the 2026-10-28 field audit (M1, M2,
+M3, M8; do not regress).** `select_verdict` takes `load_failed` /
+`load_error`: a loader exception is RESULTS UNREADABLE
+(`results_unreadable_descriptor`), never STANDBY, and sits below
+RESULTS UNAVAILABLE and PIPELINE ERROR in the no-data tail.
+`NextflowManager._parse_trace_file(force=True)` is read once after the
+process exits (monitor loop and launch thread), bypassing the 1 s
+stability window that otherwise lost the last window's tasks; and
+`_apply_terminal_workflow_status` treats exit 0 with zero tasks as
+"completed" with `status["completion_note"]`, not as a crash. Free space on
+the results volume is polled by `_update_file_counts` through
+`core/utils/disk_space.py` (`LOW_DISK_FLOOR_GB`, shared with the readiness
+check) into `status["disk_free_gb"]` / `status["disk_low"]`, which the
+header and `with_failure_clauses(disk_low=...)` carry. `update_interval`
+takes the tick count and serves `WARMUP_TICKS` (2) at the active cadence
+before the idle back-off, so existing results render within seconds of
+boot.
 
 **Verdict-banner decision logic is a pure function.** The safety-critical
 clinical verdict (ACTION REQUIRED / MONITORING / ALL CLEAR / INSUFFICIENT READS

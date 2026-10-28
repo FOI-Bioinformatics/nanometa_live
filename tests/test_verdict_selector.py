@@ -482,3 +482,42 @@ class TestErrorOutranksStarting:
     def test_starting_without_error_is_still_screening(self):
         d = verdict(overall_status_starting=True)
         assert d.state == "SCREENING"
+
+
+class TestLoadFailed:
+    """A loader exception is RESULTS UNREADABLE, not STANDBY (field audit
+    2026-10-28, M1). The callback used to catch the exception, set
+    main_dir_available False and fall through to the grey "start an
+    analysis" state -- while the pipeline was running and writing."""
+
+    def test_load_failure_is_not_standby(self):
+        d = verdict(load_failed=True, load_error="ValueError: bad row",
+                    kraken_has_data=False)
+        assert d.state == "RESULTS_UNREADABLE"
+        assert "bad row" in d.subtitle
+        assert d.bg_color not in ("#d4edda", "#f8f9fa")
+
+    def test_load_failure_while_running_is_still_unreadable(self):
+        d = verdict(load_failed=True, kraken_has_data=False, pipeline_running=True)
+        assert d.state == "RESULTS_UNREADABLE"
+
+    def test_lost_directory_outranks_it(self):
+        d = verdict(load_failed=True, results_dir_lost=True,
+                    main_dir_available=False, kraken_has_data=False)
+        assert d.state == "RESULTS_UNAVAILABLE"
+
+    def test_pipeline_error_outranks_it(self):
+        d = verdict(load_failed=True, pipeline_error=True, kraken_has_data=False)
+        assert d.state == "PIPELINE_ERROR"
+
+    def test_data_that_did_load_keeps_its_verdict(self):
+        # The flag only matters on the no-data tail.
+        d = verdict(load_failed=True)
+        assert d.state == "ALL_CLEAR"
+
+
+class TestDiskLowClause:
+    def test_clause_reaches_the_subtitle(self):
+        d = verdict(disk_low="only 1.2 GB free on the results volume - new output may be truncated or lost")
+        assert d.state == "ALL_CLEAR"
+        assert "1.2 GB free" in d.subtitle

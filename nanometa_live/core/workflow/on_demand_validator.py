@@ -27,7 +27,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from nanometa_live.core.utils.read_extractor import ReadExtractor
 from nanometa_live.core.workflow import pathogen_genomes_store
-from nanometa_live.core.workflow.nextflow_manager import NextflowManager
+from nanometa_live.core.workflow.nextflow_manager import (
+    NextflowManager,
+    parse_pipeline_source,
+)
 from nanometa_live.core.workflow.on_demand_helpers import (
     _DEFAULT_VALIDATION_TIMEOUT_MINUTES,
     _genome_file_looks_valid,
@@ -347,24 +350,24 @@ class OnDemandValidator:
 
         config = config or {}
 
-        # Determine pipeline source
         pipeline_source = config.get("pipeline_source", "")
-        # Default profile is conda; the operator's environment is built
-        # via the conda profile per the project's nf-core convention.
+        # conda is the project's canonical pipeline profile.
         pipeline_profile = config.get("pipeline_profile", "conda")
 
         if not pipeline_source:
-            # Try to get from pipeline source config
             source_type = config.get("pipeline_source_type", "remote")
             if source_type == "local":
                 pipeline_source = config.get("pipeline_local_path", "")
             else:
                 branch = config.get("pipeline_branch", "master")
-                pipeline_source = f"FOI-Bioinformatics/nanometanf -r {branch}"
+                pipeline_source = f"remote:{branch}"
 
         if not pipeline_source:
             logger.warning("No pipeline source configured for nanometanf delegation")
             return None
+
+        # "remote:dev" is a config value, not a project name (H4, 2026-10-28).
+        pipeline_project, pipeline_revision = parse_pipeline_source(pipeline_source)
 
         # Validation reads the ORIGINAL FASTQ files; the results directory is
         # not a substitute. The command below used to fall back to it when
@@ -437,8 +440,10 @@ class OnDemandValidator:
         launch_dir, work_dir = launch_context
 
         outdir = self.results_dir
-        cmd = [
-            "nextflow", "run", pipeline_source,
+        cmd = ["nextflow", "run", pipeline_project]
+        if pipeline_revision:
+            cmd.extend(["-r", pipeline_revision])
+        cmd += [
             "-resume",
             "-work-dir", str(work_dir),
             "--validation_only",

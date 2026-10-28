@@ -1853,11 +1853,12 @@ class BundleManager:
                     )
                 logger.info(
                     "Relocated conda cache to %s: %d text, %d binary, "
-                    "%d symlink rewrites",
+                    "%d symlink rewrites, %d byte-compiled modules dropped",
                     restored_cache,
                     stats["text_rewritten"],
                     stats["binary_patched"],
                     stats["symlinks_retargeted"],
+                    stats.get("pyc_removed", 0),
                 )
 
                 # Cross-check the restored env count against what the

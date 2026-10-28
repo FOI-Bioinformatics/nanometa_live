@@ -14,6 +14,7 @@ import pytest
 
 from nanometa_live.cli import prepare as cli
 from nanometa_live.cli.prepare import _progress_bar, main
+from pathlib import Path
 
 
 class TestProgressBar:
@@ -318,3 +319,28 @@ class TestEnsureDataDirs:
         blocker.write_text("regular file")
         cli._ensure_data_dirs(_Args(home=str(blocker / "sub")))
         assert "Could not create" in capsys.readouterr().err
+
+
+class TestNextflowRuntimeCached:
+    """Field audit 2026-10-28, H6: the doctor says whether the launcher's
+    runtime jar is cached, i.e. whether a Start into a fresh NXF_HOME can
+    work offline."""
+
+    def test_cached_jar_passes(self, tmp_path):
+        from nanometa_live.cli.prepare import nextflow_runtime_cached
+        fw = tmp_path / "framework" / "26.04.0"; fw.mkdir(parents=True)
+        (fw / "nextflow-26.04.0-one.jar").write_bytes(b"jar")
+        ok, where = nextflow_runtime_cached("26.04.0 build 5903", nxf_home=str(tmp_path))
+        assert ok and str(fw) == where
+
+    def test_missing_jar_fails_naming_the_dir(self, tmp_path, monkeypatch):
+        from nanometa_live.cli.prepare import nextflow_runtime_cached
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        ok, where = nextflow_runtime_cached("26.04.0 build 5903", nxf_home=str(tmp_path))
+        assert ok is False
+        assert "26.04.0" in where and "framework" in where
+
+    def test_unknown_version_is_not_checked(self, tmp_path):
+        from nanometa_live.cli.prepare import nextflow_runtime_cached
+        ok, where = nextflow_runtime_cached("not found", nxf_home=str(tmp_path))
+        assert ok is False and "unknown" in where
