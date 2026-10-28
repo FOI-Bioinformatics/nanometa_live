@@ -1443,6 +1443,28 @@ from files on disk. Marked rather than hidden — hiding loses the fact that
 the barcode was attempted. The exported report carries the same
 attempted-but-no-output marking.
 
+**Start is gated on the server, and the lock knows the pipeline (field
+audit 2026-10-28, H5 and H3).** `start_or_prompt_stop` takes
+`State("readiness-state")` and refuses a launch through
+`app/utils/start_gate.readiness_blocks_start` when any CRITICAL row failed
+or the state was never computed; the header button's disabled attribute is
+a courtesy that the Preparation tab's proxy button and a stale Store walk
+past, and before this nothing else checked. `start_without_readiness` /
+`NANOMETA_ALLOW_NOT_READY=1` are the operator's override. The run lock
+(`.nanometa.lock`) records `nextflow_pid` once the monitor loop sees it
+(`_record_nextflow_pid`); `_acquire_lock` refuses while that process lives
+even if the GUI that took the lock is dead (it used to call the lock stale
+and start a second pipeline into the same outdir and work dir), the
+startup toast `warn_about_orphan_run_on_startup` names such a run, and the
+lock is opened `a+` so a second instance reads the holder's record instead
+of truncating it. Attaching to an orphan is not offered: the manager cannot
+adopt a subprocess handle it did not create. **Dash callback_map gotcha:**
+two callbacks with the same Output and the same Input set share a
+`callback_map` key and the later registration silently replaces the
+earlier one. The orphan toast therefore takes `results-dir-path` as its
+Input, not `app-config` like the missing-paths toast; tests select startup
+callbacks by function name for the same reason.
+
 **Verdict-banner decision logic is a pure function.** The safety-critical
 clinical verdict (ACTION REQUIRED / MONITORING / ALL CLEAR / INSUFFICIENT READS
 / NOT SCREENED / SCREENING / STANDBY) is decided by `select_verdict()` in

@@ -8,6 +8,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Start Analysis now refuses a run that fails a CRITICAL readiness check,
+  and names the rows. The checklist looked like a gate and was not one: the
+  header button's disabled attribute was the only barrier, the Preparation
+  tab's Start button proxied past it, and the Start callback never read
+  the readiness Store, so "Not Ready, 10/25 checks passed" sat above an
+  enabled Start Analysis button. The refusal is server-side on every click
+  (`readiness_blocks_start`); a readiness state never computed refuses too.
+  `start_without_readiness: true` in the configuration, or
+  `NANOMETA_ALLOW_NOT_READY=1`, starts anyway.
+- A pipeline that outlives the dashboard is no longer invisible. Nextflow
+  runs in its own session and survives a GUI crash; the lock recorded only
+  the GUI's PID, so the next launch called the lock stale and started a
+  second pipeline into the same results and work folders. The lock now
+  records the pipeline's PID once known, a launch into a folder whose
+  pipeline still lives is refused with that PID and how to stop it, a
+  startup toast names such a run, and the lock is opened without
+  truncating the holder's record (a second instance used to report an
+  empty "Lock info").
+- **The memory ceiling never rises above `--max_memory`.** `conf/base.config`
+  raises `resourceLimits.memory` to `kraken2_memory_gb` so an operator's
+  explicit PlusPFP size is honoured, and that also raised it above a
+  laptop's RAM when the request was sized from a database larger than the
+  machine (Nanometa Live sends `hash.k2d` + 4 GB); the local executor
+  refuses a request above physical memory and aborts the run. The ceiling
+  is now `min(max(16, kraken2_memory_gb), max_memory)`, and the three
+  Kraken2 processes clamp their no-mmap retry (`full * attempt`, which
+  asked for twice the RAM exactly when a segfault had made a retry
+  necessary) to the same param. The 128 GB default leaves every existing
+  invocation unchanged; Nanometa Live sends the host's own ceiling.
+  Verified in a stub run: a 29 GB request under `--max_memory 12.GB` is
+  traced at 12 GB.
+
 - A Kraken2 database larger than the laptop no longer aborts the run at its
   first classifier task. The launch sized the request from `hash.k2d` and
   nothing compared it to the machine; nanometanf raised its memory ceiling
