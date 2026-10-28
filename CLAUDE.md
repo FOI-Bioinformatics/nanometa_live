@@ -117,7 +117,19 @@ and dependencies stay dynamic (`nanometa_live.__version__` and
 
 `nanometa_live_env.yml` includes Nextflow (`>=26.04.0`) — without it the
 environment yields a working dashboard and a pipeline that fails the moment
-Start Analysis is pressed. `nanometa-prepare doctor` is the config-free
+Start Analysis is pressed. It must carry EVERY runtime requirement at the
+same floor as `requirements.txt` (`tests/test_env_yml_covers_requirements.py`
+is the fence): it is the documented offline install route, and six missing
+packages once left a field machine with an app that failed at import and a
+`pip install` that reached for PyPI (field audit 2026-10-28, H6). A GUI
+Start gives each run its own `NXF_HOME` under the results folder; the
+get.nextflow.io launcher keeps its runtime jar under
+`$NXF_HOME/framework/<ver>/` and downloads it when absent, which
+`NXF_OFFLINE` does not stop, so `_build_nextflow_env` seeds the fresh home
+by symlinking `framework/` and `capsule/` from `~/.nextflow`
+(`_seed_nextflow_home`), and the doctor's "Nextflow runtime cache" row says
+whether that cache exists. The bioconda launcher ships its jar and needs
+neither. `nanometa-prepare doctor` is the config-free
 post-install check (Python, Nextflow + floor, conda, container runtimes, data
 dirs); `nanometa-prepare check --config` is the run-specific one. Every CLI
 subcommand except `verify` calls `NanometaPaths.ensure_dirs()` before

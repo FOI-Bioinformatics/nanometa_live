@@ -914,11 +914,59 @@ class NextflowManager:
                 if not env.get("NXF_HOME"):
                     env["NXF_HOME"] = nxf_home
                     logging.info(f"NXF_HOME set to: {nxf_home}")
+                    NextflowManager._seed_nextflow_home(nxf_home)
                 if not env.get("NXF_TEMP"):
                     env["NXF_TEMP"] = nxf_temp
                     logging.info(f"NXF_TEMP set to: {nxf_temp}")
 
         return env
+
+    # What the get.nextflow.io launcher caches under NXF_HOME and fetches
+    # from the network when absent: the runtime jar for the launcher's
+    # version (framework/<version>/) and its dependency cache (capsule/).
+    _NXF_HOME_SEED_DIRS = ("framework", "capsule")
+
+    @staticmethod
+    def _default_nextflow_home() -> Path:
+        return Path(os.path.expanduser("~")) / ".nextflow"
+
+    @classmethod
+    def _seed_nextflow_home(cls, nxf_home: str) -> List[str]:
+        """Point a fresh per-run NXF_HOME at the launcher's cached runtime.
+
+        Every run gets its own NXF_HOME under the results folder (so a
+        read-only home directory cannot break a launch). The get.nextflow.io
+        launcher keeps its runtime jar under ``$NXF_HOME/framework/<ver>/``
+        and downloads it when the directory is empty -- which a fresh
+        results folder always is -- so an air-gapped field machine failed at
+        the first Start into a new folder before any process ran, and
+        ``NXF_OFFLINE`` does not stop that fetch (field audit 2026-10-28,
+        H6). The bioconda launcher ships its jar beside the script and never
+        looks here, so for it this is a no-op. Returns the names it linked.
+        """
+        linked: List[str] = []
+        source = cls._default_nextflow_home()
+        if not source.is_dir():
+            return linked
+        try:
+            os.makedirs(nxf_home, exist_ok=True)
+        except OSError:
+            return linked
+        for name in cls._NXF_HOME_SEED_DIRS:
+            src = source / name
+            dst = Path(nxf_home) / name
+            if not src.is_dir() or os.path.lexists(dst):
+                continue
+            try:
+                os.symlink(str(src), str(dst))
+                linked.append(name)
+            except OSError as exc:
+                logging.debug(f"Could not seed {dst} from {src}: {exc}")
+        if linked:
+            logging.info(
+                f"Seeded NXF_HOME {nxf_home} from {source}: {', '.join(linked)}"
+            )
+        return linked
 
     def _run_workflow(self, cmd: List[str], config: Optional[Dict[str, Any]] = None) -> None:
         """

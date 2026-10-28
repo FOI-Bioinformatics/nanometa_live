@@ -146,6 +146,47 @@ and the Nextflow plugins -- optionally also pre-warmed conda environments or
 container images. The **Kraken2 database is not included** because of its size;
 copy it separately (for example on the same drive).
 
+### What does NOT transfer: install these on the field machine while it is online
+
+The bundle does not carry Nanometa Live itself, Nextflow, Java or conda.
+Install them on the field machine **before it leaves the network**, from the
+environment file that pins every runtime requirement:
+
+```bash
+conda env create -f nanometa_live_env.yml      # app deps, Nextflow, Java, BLAST, datasets
+conda activate nanometa_live_env
+pip install --no-deps "nanometa-live @ git+https://github.com/FOI-Bioinformatics/nanometa_live@<release>"
+nextflow -version                               # caches the Nextflow runtime for offline starts
+nanometa-prepare doctor                         # must report no failures
+```
+
+`nanometa-prepare doctor` checks Python, Java, Nextflow and its version
+floor, the cached Nextflow runtime, conda and the container runtimes. Fix
+anything it reports while you still have a connection.
+
+### Before you leave: pre-departure checklist
+
+Do this on the field machine itself, with Wi-Fi off, the day before
+departure. A bundle that imports cleanly has not yet proven it can run.
+
+- [ ] `nanometa-prepare doctor` reports no failures.
+- [ ] The bundle is imported (`nanometa-prepare import --bundle ... --db ...`)
+      and `nanometa-prepare verify --bundle ...` reported no blockers.
+- [ ] The Kraken2 database is on the **internal** disk, not a USB drive, and
+      the **Database Memory** readiness row is green or amber, not red.
+- [ ] The readiness checklist in **Watchlist & Preparation** shows no CRITICAL
+      rows; Start Analysis refuses to launch while any remains.
+- [ ] **One real run completes air-gapped**: a small FASTQ folder, Start
+      Analysis, a verdict banner, an exported report. This is the only step
+      that proves the conda environments and containers work on this
+      machine. Do not skip it.
+- [ ] The watchlist you will use is loaded and its organisms show as
+      *detectable* in the database coverage report.
+- [ ] Free disk: at least the Kraken2 database size plus 50 GB for a
+      multi-barcode run (work directories are not cleaned during a run).
+- [ ] The laptop's sleep-on-lid-close is disabled for the run.
+- [ ] Contact details for bioinformatics support are filled in below.
+
 ### 1. On the build machine -- export
 
 1. Open the **Deployment** tab and use **Export Bundle**.
@@ -407,7 +448,7 @@ Basic
 - [ ] Hover over elements to see tooltips.
 
 Intermediate
-- [ ] Generate a PDF report.
+- [ ] Generate and open the exported HTML report.
 - [ ] Interpret QC statistics.
 - [ ] Identify samples needing attention.
 - [ ] Follow action guidance for an alert.

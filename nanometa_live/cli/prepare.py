@@ -20,6 +20,7 @@ import textwrap
 # Re-exported so callers (and tests) can keep patching prepare._verify; the
 # implementation moved to verify_bundle_cmd for the file-size ratchet.
 from nanometa_live.cli.verify_bundle_cmd import _verify  # noqa: E402,F401
+from pathlib import Path
 
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
@@ -450,6 +451,44 @@ def _doctor_check_toolchain(report):
                 f"nanometanf requires Nextflow >= {_NEXTFLOW_MIN_VERSION}. "
                 "Update it before launching a run.",
             )
+            cached, where = nextflow_runtime_cached(nf_version)
+            report(
+                "Nextflow runtime cache", cached, where,
+                "The get.nextflow.io launcher downloads its runtime jar into "
+                "NXF_HOME/framework/<version>/ when absent, and a Start into a "
+                "new results folder uses a fresh NXF_HOME; NXF_OFFLINE does not "
+                "stop that fetch. Run `nextflow -version` once while online so "
+                "the jar is cached under ~/.nextflow (Start seeds per-run homes "
+                "from it). A bioconda Nextflow ships its jar and needs nothing.",
+                fatal=False,
+            )
+
+def nextflow_runtime_cached(nf_version, nxf_home=None):
+    """Whether the launcher's runtime jar for ``nf_version`` is cached.
+
+    ``nf_version`` is the "X.Y.Z build N" string ``_get_nextflow_version``
+    returns. The get.nextflow.io launcher keeps the jar under
+    ``$NXF_HOME/framework/<X.Y.Z>/``; a bioconda install keeps its jar
+    beside the launcher and passes here through that directory instead.
+    Returns ``(ok, detail)``.
+    """
+    import re as _re
+
+    m = _re.match(r"(\d+\.\d+\.\d+[^\s]*)", (nf_version or "").strip())
+    if not m:
+        return False, "version unknown, cache not checked"
+    version = m.group(1)
+    home = Path(nxf_home or os.environ.get("NXF_HOME") or os.path.expanduser("~/.nextflow"))
+    framework = home / "framework" / version
+    if framework.is_dir() and any(framework.glob("*.jar")):
+        return True, str(framework)
+    launcher = shutil.which("nextflow")
+    if launcher:
+        beside = Path(launcher).resolve().parent.parent / "share" / "nextflow"
+        if beside.is_dir() and any(beside.rglob("nextflow*.jar")):
+            return True, f"{beside} (launcher ships its runtime)"
+    return False, f"no runtime jar for {version} under {home / 'framework'}"
+
 
 def _doctor_check_runtimes(report):
     """Conda and the container engines.

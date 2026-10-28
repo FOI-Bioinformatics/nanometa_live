@@ -8,6 +8,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The field install is documented, pinned and checked. `nanometa_live_env.yml`
+  omitted six runtime requirements (dash-ag-grid, diskcache, psutil,
+  multiprocess, dill, openpyxl), so an environment built from it failed at
+  import and `pip install .` then reached PyPI, on a machine with no
+  network; the file now carries every requirement at the same floor, with
+  a test keeping it in step with `requirements.txt`. A Start into a new
+  results folder gave the get.nextflow.io launcher a fresh `NXF_HOME` with
+  no runtime jar, which it downloads and `NXF_OFFLINE` does not prevent;
+  the launch now seeds the per-run home from `~/.nextflow` and
+  `nanometa-prepare doctor` reports whether the runtime is cached. The
+  Operator Guide gained the install steps the bundle does not cover and a
+  pre-departure checklist ending with one real air-gapped run.
 - On-demand validation launches on a default install. The launcher placed
   the configured `pipeline_source` in the command verbatim, so the default
   `remote:dev` became `nextflow run remote:dev`, not a project name, and
