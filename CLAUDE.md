@@ -1477,6 +1477,24 @@ earlier one. The orphan toast therefore takes `results-dir-path` as its
 Input, not `app-config` like the missing-paths toast; tests select startup
 callbacks by function name for the same reason.
 
+**Four truthfulness gaps closed by the 2026-10-28 field audit (M1, M2,
+M3, M8; do not regress).** `select_verdict` takes `load_failed` /
+`load_error`: a loader exception is RESULTS UNREADABLE
+(`results_unreadable_descriptor`), never STANDBY, and sits below
+RESULTS UNAVAILABLE and PIPELINE ERROR in the no-data tail.
+`NextflowManager._parse_trace_file(force=True)` is read once after the
+process exits (monitor loop and launch thread), bypassing the 1 s
+stability window that otherwise lost the last window's tasks; and
+`_apply_terminal_workflow_status` treats exit 0 with zero tasks as
+"completed" with `status["completion_note"]`, not as a crash. Free space on
+the results volume is polled by `_update_file_counts` through
+`core/utils/disk_space.py` (`LOW_DISK_FLOOR_GB`, shared with the readiness
+check) into `status["disk_free_gb"]` / `status["disk_low"]`, which the
+header and `with_failure_clauses(disk_low=...)` carry. `update_interval`
+takes the tick count and serves `WARMUP_TICKS` (2) at the active cadence
+before the idle back-off, so existing results render within seconds of
+boot.
+
 **Verdict-banner decision logic is a pure function.** The safety-critical
 clinical verdict (ACTION REQUIRED / MONITORING / ALL CLEAR / INSUFFICIENT READS
 / NOT SCREENED / SCREENING / STANDBY) is decided by `select_verdict()` in

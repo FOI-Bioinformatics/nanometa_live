@@ -8,6 +8,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Four places where the dashboard rendered less than it knew (field audit
+  2026-10-28, M1, M2, M3, M8). A loader exception during a run showed a
+  calm grey STANDBY; it is now the amber RESULTS UNREADABLE state with the
+  error named. The final execution trace is re-read after Nextflow exits,
+  so tasks that finished in the last poll window (the final aggregator, a
+  last isolated failure) are counted, and a clean exit without a single
+  task (a real-time timer that fired before any file arrived) reads
+  "Complete - no task ran" instead of PIPELINE ERROR. The backend polls
+  free space on the results volume every tick and the header and verdict
+  subtitle say so below the 5 GB floor, since a full disk ends a run
+  COMPLETE over truncated reports. And the first polls after boot stay at
+  the active cadence, so a dashboard opened on existing results shows them
+  within seconds rather than after the 60 s idle interval (79 s measured).
 - The field install is documented, pinned and checked. `nanometa_live_env.yml`
   omitted six runtime requirements (dash-ag-grid, diskcache, psutil,
   multiprocess, dill, openpyxl), so an environment built from it failed at

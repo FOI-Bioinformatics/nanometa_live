@@ -27,12 +27,20 @@ from nanometa_live.app.app import background_callback_manager
 
 def register_interval_offline(app, backend_manager):
 
+    # Ticks served at the active cadence before the idle back-off applies.
+    # The Interval boots at the active cadence, but the first app-config
+    # write switched it to the idle one before the first tick fired, so a
+    # dashboard opened on existing results showed STANDBY and 0 sequences
+    # for 60 s and more (79 s measured; field audit 2026-10-28, M8).
+    WARMUP_TICKS = 2
+
     @app.callback(
         Output("update-interval", "interval"),
         Input("app-config", "data"),
         Input("backend-status", "data"),
+        Input("update-interval", "n_intervals"),
     )
-    def update_interval(config, status):
+    def update_interval(config, status, n_intervals=0):
         """Adaptive poll cadence.
 
         Poll at the configured ``update_interval_seconds`` while a run is
@@ -48,7 +56,7 @@ def register_interval_offline(app, backend_manager):
         config = config or {}
         active = bool(status and (status.get("running") or status.get("starting")))
         base = config.get("update_interval_seconds", 10)
-        if active:
+        if active or (n_intervals or 0) < WARMUP_TICKS:
             return int(base) * 1000
         idle = config.get("idle_update_interval_seconds") or max(int(base), 60)
         return int(idle) * 1000

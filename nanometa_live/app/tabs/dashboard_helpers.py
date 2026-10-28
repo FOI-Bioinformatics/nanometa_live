@@ -821,6 +821,7 @@ from nanometa_live.app.tabs.verdict_states import (  # noqa: F401
     VerdictDescriptor,
     pipeline_error_descriptor as _pipeline_error_descriptor,
     results_unavailable_descriptor as _results_unavailable_descriptor,
+    results_unreadable_descriptor as _results_unreadable_descriptor,
     with_failure_clauses as _with_failure_clauses,
 )
 
@@ -1095,6 +1096,7 @@ def _data_verdict(
     failed_tasks=0,
     input_layout_mismatch=None,
     batch_progress_clause=None,
+    disk_low=None,
 ) -> VerdictDescriptor:
     """The data-available branch of select_verdict (extracted, still pure).
 
@@ -1105,7 +1107,8 @@ def _data_verdict(
     health = dict(stale_samples=stale_samples, run_stopped=run_stopped,
                   stop_reason=stop_reason, failed_tasks=failed_tasks,
                   input_layout_mismatch=input_layout_mismatch,
-                  batch_progress_clause=batch_progress_clause)
+                  batch_progress_clause=batch_progress_clause,
+                  disk_low=disk_low)
     if dangerous:
         return _with_failure_clauses(
             _detection_descriptor(
@@ -1156,12 +1159,14 @@ def _data_verdict(
 
 
 def _run_health(stale_samples, run_stopped, stop_reason, failed_tasks,
-                input_layout_mismatch, batch_progress_clause=None):
+                input_layout_mismatch, batch_progress_clause=None,
+                disk_low=None):
     """The run-health inputs a data-state verdict carries into its subtitle."""
     return dict(stale_samples=stale_samples, run_stopped=run_stopped,
                 stop_reason=stop_reason, failed_tasks=failed_tasks,
                 input_layout_mismatch=input_layout_mismatch,
-                batch_progress_clause=batch_progress_clause)
+                batch_progress_clause=batch_progress_clause,
+                disk_low=disk_low)
 
 
 def select_verdict(
@@ -1187,6 +1192,9 @@ def select_verdict(
     failed_tasks: int = 0,
     input_layout_mismatch: Optional[str] = None,
     batch_progress_clause: Optional[str] = None,
+    disk_low: Optional[str] = None,
+    load_failed: bool = False,
+    load_error: Optional[str] = None,
 ) -> VerdictDescriptor:
     """Pure decision: pick the verdict banner state from the analysis inputs.
 
@@ -1234,7 +1242,7 @@ def select_verdict(
             pipeline_error_detail=pipeline_error_detail,
             **_run_health(stale_samples, run_stopped, stop_reason,
                           failed_tasks, input_layout_mismatch,
-                          batch_progress_clause),
+                          batch_progress_clause, disk_low),
         )
 
     return _no_data_verdict(
@@ -1243,12 +1251,15 @@ def select_verdict(
         pipeline_error=pipeline_error,
         pipeline_error_detail=pipeline_error_detail,
         pipeline_running=pipeline_running,
+        load_failed=load_failed,
+        load_error=load_error,
     )
 
 
 def _no_data_verdict(
     *, results_dir_lost, main_dir_available, pipeline_error,
-    pipeline_error_detail, pipeline_running,
+    pipeline_error_detail, pipeline_running, load_failed=False,
+    load_error=None,
 ) -> VerdictDescriptor:
     """The no-Kraken-data tail of select_verdict (pure)."""
     # A directory that held data earlier and is now unreadable is an event
@@ -1259,6 +1270,10 @@ def _no_data_verdict(
     if pipeline_error:
         return _pipeline_error_descriptor(
             pipeline_error_detail, has_partial_data=False)
+    # The loader raised: "we could not read" is not "nothing to read"
+    # (field audit 2026-10-28, M1).
+    if load_failed:
+        return _results_unreadable_descriptor(load_error)
 
     # Results directory present but no rows yet, pipeline still producing them.
     if main_dir_available and pipeline_running:

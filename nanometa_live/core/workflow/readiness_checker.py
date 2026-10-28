@@ -928,9 +928,10 @@ class ReadinessChecker:
                 "Could not determine disk space (path does not exist)"
             )
         try:
+            from nanometa_live.core.utils.disk_space import LOW_DISK_FLOOR_GB
             usage = shutil.disk_usage(str(check_path))
             free_gb = usage.free / (1024 ** 3)
-            if free_gb < 5:
+            if free_gb < LOW_DISK_FLOOR_GB:
                 # Round 3: below the hard floor the check FAILS and gates
                 # Start. A run launched onto a nearly full volume hits
                 # ENOSPC mid-run, which truncates reports -- the compound
@@ -942,7 +943,7 @@ class ReadinessChecker:
                     "Disk Space", False,
                     Severity.WARNING if allow else Severity.CRITICAL,
                     f"Only {free_gb:.1f} GB free in the output volume -- "
-                    "below the 5 GB floor for a run",
+                    f"below the {LOW_DISK_FLOOR_GB} GB floor for a run",
                     details=(
                         "Free space or choose another results folder. To "
                         "start anyway, export NANOMETA_ALLOW_LOW_DISK=1."

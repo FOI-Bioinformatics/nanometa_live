@@ -1263,6 +1263,15 @@ class BackendManager:
                     self.config.get("sample_handling"), root_files, dirs_with_reads,
                 )
 
+            # Free space on the results volume, same cadence as the file
+            # count (field audit 2026-10-28, M3). The readiness floor only
+            # runs at Start; a 24-barcode overnight run fills a laptop SSD
+            # after it.
+            from nanometa_live.core.utils.disk_space import free_gb, low_disk_message
+            free = free_gb(self._lock_target_dir())
+            self.status["disk_free_gb"] = None if free is None else round(free, 1)
+            self.status["disk_low"] = low_disk_message(free)
+
             # Update status with waiting files
             # Processed files comes from workflow_manager status
             self.status["files_waiting"] = waiting_files
@@ -1481,6 +1490,19 @@ class BackendManager:
             self.status["pipeline_status"] = "completed"
             self.status["running"] = False
             logging.info("Pipeline completed successfully")
+            self._record_final_status()
+            return True
+
+        if exit_code == 0:
+            # Nextflow exited cleanly without running a task: a real-time
+            # run whose timer fired before any file arrived, or an input
+            # folder that held nothing to classify. Not a crash (field audit
+            # 2026-10-28, M2); the header says what happened.
+            self.status["pipeline_status"] = "completed"
+            self.status["running"] = False
+            self.status["completion_note"] = (
+                "no task ran - no input file reached the pipeline")
+            logging.warning("Pipeline completed without running any task")
             self._record_final_status()
             return True
 

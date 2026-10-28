@@ -1006,6 +1006,10 @@ class NextflowManager:
 
                 # Wait for completion
                 exit_code = self.process.wait()
+                # The monitor thread may be mid-sleep; count the last tasks
+                # here too so the exit status and the task counts the
+                # backend reads together are from the same final trace.
+                self.status.update(self._parse_trace_file(force=True))
                 # Record it before any error handling: BackendManager uses it
                 # to tell an isolated (ignored) task failure from a run
                 # failure -- Nextflow exits 0 for the former.
@@ -1088,6 +1092,9 @@ class NextflowManager:
                 # Check if process is still running
                 if self.process.poll() is not None:
                     logging.info("Nextflow process has terminated")
+                    # Nothing writes the trace any more: read it one last
+                    # time, past the stability window.
+                    self.status.update(self._parse_trace_file(force=True))
                     self.running = False
                     break
 
@@ -1115,9 +1122,16 @@ class NextflowManager:
 
         logging.info("Nextflow trace monitor stopped")
 
-    def _parse_trace_file(self) -> Dict[str, Any]:
+    def _parse_trace_file(self, force: bool = False) -> Dict[str, Any]:
         """
         Parse Nextflow trace file for process execution status.
+
+        ``force`` reads the file even inside its 1 s stability window: the
+        final read after Nextflow exits, when nothing can be writing it any
+        more. Without it the tasks that finished in the last poll window
+        (the final aggregator, a last isolated failure) were never counted
+        and a run could render Complete over an uncounted failure (field
+        audit 2026-10-28, M2).
 
         Returns:
             Dictionary with process counts and stage-level information
@@ -1132,7 +1146,7 @@ class NextflowManager:
             try:
                 stat = os.stat(trace_path)
                 age = time.time() - stat.st_mtime
-                if age < 1.0:
+                if age < 1.0 and not force:
                     return self._last_trace_status or {}
             except OSError:
                 return {}
