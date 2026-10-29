@@ -1282,9 +1282,14 @@ directive; nothing in that repository includes either file, so no run
 was affected.
 
 None of this touches the runtime path — pipelines run normally under
-4.0.2 and 4.2.1. `nf_core_version` in nanometanf's `.nf-core.yml`
-stays at 3.5.2 on purpose: it records the template version that
-pipeline was last synced to, not which tool to run.
+4.0.2 and 4.2.1. `nf_core_version` in nanometanf's `.nf-core.yml` records the template
+version the pipeline was last synced to, not which tool to run. It reads
+4.2.1 since the 2026-10-29 hand sync (the repository has no TEMPLATE
+branch for `nf-core pipelines sync`), which brought nf-schema 2.7.3, the
+template's pinned `utils_*` subworkflows, the help flags into the schema
+subworkflow and the end of `hook_url`. nf-schema 2.7 validates `false`
+values it used to skip, so a non-boolean parameter must never be sent as
+`false`; the GUI's generated parameters were checked against the schema.
 
 The 25.10.x watchPath JVM cleanup hang (the historical reason for the
 `NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0.
