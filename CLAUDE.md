@@ -1065,7 +1065,7 @@ removed in the 2026-05-07 audit pass (commit `4c7c284`).
 
 ### Durable invariants in the validation pipeline
 
-- `subworkflows/local/validation/main.nf` coerces `taxids_to_validate` to string before `.split()`. Nextflow's CLI parser silently promotes all-digit single values to `Integer` regardless of schema; coercion is required for single-taxid GUI calls.
+- `subworkflows/local/validation/main.nf` coerces `taxids_to_validate` to string before `.split()`. Nextflow's CLI parser silently promotes all-digit single values to `Integer` regardless of schema; coercion is required for single-taxid GUI calls. nf-schema (2.7.2+) applies the same cast to every command-line AND params-file string before it checks the type, so nanometanf's schema types the parameter `["string", "integer"]` (since 1.12.0dev); typed as string alone it refused the single-taxid `-params-file` the GUI writes for a run with one watched organism. Any other string-typed parameter the GUI sends with a digit-only value (`sample_name` is the candidate) would be refused the same way.
 - `modules/local/minimap2_validation/main.nf` double-escapes `\\n` in the awk JSON writer because bare `\n` in a Groovy triple-quoted string expands at parse time.
 - `modules/local/blastn_validation/main.nf` deduplicates BLAST hits by `qseqid` so `hit_rate` stays bounded to `[0, 1]`. Counting raw HSPs produces hit rates above 1.
 
