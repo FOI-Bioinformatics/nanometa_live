@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from nanometa_live.cli import doctor as doctor_mod
 from nanometa_live.cli import prepare as cli
 from nanometa_live.cli.prepare import _progress_bar, main
 from pathlib import Path
@@ -214,6 +215,22 @@ class TestVerifyHandler:
         assert "verification FAILED" in out
 
 
+class TestJavaVersionLine:
+    """`java -version` output is not reliably version-first."""
+
+    def test_prefers_the_version_line_over_a_tool_options_banner(self):
+        out = ('Picked up JAVA_TOOL_OPTIONS: -Dhttps.proxyHost=127.0.0.1\n'
+               'openjdk version "17.0.9" 2023-10-17\n'
+               'OpenJDK Runtime Environment (build 17.0.9+9)\n')
+        assert doctor_mod._java_version_line(out) == \
+            'openjdk version "17.0.9" 2023-10-17'
+
+    def test_falls_back_to_the_first_line_and_tolerates_empty(self):
+        assert doctor_mod._java_version_line("  Error: no JVM\n") == \
+            "Error: no JVM"
+        assert doctor_mod._java_version_line("") == ""
+
+
 class TestDoctorHandler:
     """`check` needs a config; doctor answers 'is this fresh install sane?'."""
 
@@ -236,8 +253,10 @@ class TestDoctorHandler:
             (True, "openjdk version \"17.0.9\"") if java
             else (False, "not found on PATH")
         )
-        with patch.object(cli.shutil, "which", side_effect=fake_which), \
-             patch.object(cli, "_java_runtime_available",
+        # The doctor's checks live in cli/doctor.py (split 2026-10-29), so
+        # the patch must land on the module that looks the name up.
+        with patch.object(doctor_mod.shutil, "which", side_effect=fake_which), \
+             patch.object(doctor_mod, "_java_runtime_available",
                           return_value=java_result), \
              patch(
                  "nanometa_live.core.workflow.bundle_manager"

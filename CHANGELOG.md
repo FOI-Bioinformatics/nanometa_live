@@ -21,6 +21,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `plugins/` beside `framework/` and `capsule/`, so the cached plugin is what
   a per-run home sees. The log scanner also recognises nf-schema's
   "Value is [string] but should be [integer]" as a wrong-typed parameter.
+  The doctor's checks moved from `cli/prepare.py` into `cli/doctor.py`
+  (the former crossed the 800-line code-size gate); `prepare` re-exports the
+  names. The Java row now shows the `java -version` line that names the
+  version rather than a `Picked up JAVA_TOOL_OPTIONS` banner.
 
 ### Fixed
 
