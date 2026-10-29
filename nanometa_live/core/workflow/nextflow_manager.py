@@ -924,7 +924,12 @@ class NextflowManager:
     # What the get.nextflow.io launcher caches under NXF_HOME and fetches
     # from the network when absent: the runtime jar for the launcher's
     # version (framework/<version>/) and its dependency cache (capsule/).
-    _NXF_HOME_SEED_DIRS = ("framework", "capsule")
+    # framework/ and capsule/ are the launcher's runtime jar (field audit
+    # 2026-10-28, H6); plugins/ is the nf-schema plugin cache, which a
+    # fresh NXF_HOME otherwise refills from registry.nextflow.io on every
+    # Start (2026-10-29, nf-schema 3.0.0). Offline mode points Nextflow at
+    # the bundle's plugins through NXF_PLUGINS_PATH regardless.
+    _NXF_HOME_SEED_DIRS = ("framework", "capsule", "plugins")
 
     @staticmethod
     def _default_nextflow_home() -> Path:
@@ -942,7 +947,10 @@ class NextflowManager:
         the first Start into a new folder before any process ran, and
         ``NXF_OFFLINE`` does not stop that fetch (field audit 2026-10-28,
         H6). The bioconda launcher ships its jar beside the script and never
-        looks here, so for it this is a no-op. Returns the names it linked.
+        looks here, so for it that part is a no-op. ``plugins/`` is linked
+        for every launcher: the nf-schema plugin nanometanf pins lives there,
+        and a fresh home would download it again on each Start (or fail to,
+        offline). Returns the names it linked.
         """
         linked: List[str] = []
         source = cls._default_nextflow_home()
@@ -1409,6 +1417,9 @@ class NextflowManager:
                 (r"Cannot find revision", "Invalid branch or revision"),
                 (r"No such file", "File not found"),
                 (r"Missing required parameter", "Missing required parameter"),
+                # nf-schema: "--chopper_minlength (abc): Value is [string]
+                # but should be [integer]" (wording checked on 3.0.0).
+                (r"Value is \[\w+\] but should be \[\w+\]", "Parameter has the wrong type"),
                 (r"Invalid value for", "Invalid parameter value"),
                 # Docker/container errors
                 (r"docker.*not found", "Docker not found or not running"),

@@ -1065,7 +1065,7 @@ removed in the 2026-05-07 audit pass (commit `4c7c284`).
 
 ### Durable invariants in the validation pipeline
 
-- `subworkflows/local/validation/main.nf` coerces `taxids_to_validate` to string before `.split()`. Nextflow's CLI parser silently promotes all-digit single values to `Integer` regardless of schema; coercion is required for single-taxid GUI calls.
+- `subworkflows/local/validation/main.nf` coerces `taxids_to_validate` to string before `.split()`. Nextflow's CLI parser silently promotes all-digit single values to `Integer` regardless of schema; coercion is required for single-taxid GUI calls. nf-schema (2.7.2+) applies the same cast to every command-line AND params-file string before it checks the type, so nanometanf's schema types the parameter `["string", "integer"]` (since 1.12.0dev); typed as string alone it refused the single-taxid `-params-file` the GUI writes for a run with one watched organism. Any other string-typed parameter the GUI sends with a digit-only value (`sample_name` is the candidate) would be refused the same way.
 - `modules/local/minimap2_validation/main.nf` double-escapes `\\n` in the awk JSON writer because bare `\n` in a Groovy triple-quoted string expands at parse time.
 - `modules/local/blastn_validation/main.nf` deduplicates BLAST hits by `qseqid` so `hit_rate` stays bounded to `[0, 1]`. Counting raw HSPs produces hit rates above 1.
 
@@ -1282,9 +1282,20 @@ directive; nothing in that repository includes either file, so no run
 was affected.
 
 None of this touches the runtime path — pipelines run normally under
-4.0.2 and 4.2.1. `nf_core_version` in nanometanf's `.nf-core.yml`
-stays at 3.5.2 on purpose: it records the template version that
-pipeline was last synced to, not which tool to run.
+4.0.2 and 4.2.1. `nf_core_version` in nanometanf's `.nf-core.yml` records the template
+version the pipeline was last synced to, not which tool to run. It reads
+4.2.1 since the 2026-10-29 hand sync (the repository has no TEMPLATE
+branch for `nf-core pipelines sync`), which brought the template's pinned
+`utils_*` subworkflows, the help flags into the schema subworkflow and the
+end of `hook_url`; the same day the pipeline moved one step past the
+template to **nf-schema 3.0.0** with the `utils_*` subworkflows at
+nf-core/modules master. nf-schema 2.7+ validates `false` values it used to
+skip, so a non-boolean parameter must never be sent as `false` (cancel a
+profile's `input` with `null`); the GUI's generated parameters were
+checked against the schema. The plugin must be in the Nextflow plugin
+cache for a Start or a bundle export to work offline:
+`nanometa-prepare doctor` has a row for it, and `_seed_nextflow_home`
+links `plugins/` into each per-run `NXF_HOME`.
 
 The 25.10.x watchPath JVM cleanup hang (the historical reason for the
 `NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0.

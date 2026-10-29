@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from nanometa_live.cli import doctor as doctor_mod
 from nanometa_live.cli import prepare as cli
 from nanometa_live.cli.prepare import _progress_bar, main
 from pathlib import Path
@@ -214,6 +215,22 @@ class TestVerifyHandler:
         assert "verification FAILED" in out
 
 
+class TestJavaVersionLine:
+    """`java -version` output is not reliably version-first."""
+
+    def test_prefers_the_version_line_over_a_tool_options_banner(self):
+        out = ('Picked up JAVA_TOOL_OPTIONS: -Dhttps.proxyHost=127.0.0.1\n'
+               'openjdk version "17.0.9" 2023-10-17\n'
+               'OpenJDK Runtime Environment (build 17.0.9+9)\n')
+        assert doctor_mod._java_version_line(out) == \
+            'openjdk version "17.0.9" 2023-10-17'
+
+    def test_falls_back_to_the_first_line_and_tolerates_empty(self):
+        assert doctor_mod._java_version_line("  Error: no JVM\n") == \
+            "Error: no JVM"
+        assert doctor_mod._java_version_line("") == ""
+
+
 class TestDoctorHandler:
     """`check` needs a config; doctor answers 'is this fresh install sane?'."""
 
@@ -236,8 +253,10 @@ class TestDoctorHandler:
             (True, "openjdk version \"17.0.9\"") if java
             else (False, "not found on PATH")
         )
-        with patch.object(cli.shutil, "which", side_effect=fake_which), \
-             patch.object(cli, "_java_runtime_available",
+        # The doctor's checks live in cli/doctor.py (split 2026-10-29), so
+        # the patch must land on the module that looks the name up.
+        with patch.object(doctor_mod.shutil, "which", side_effect=fake_which), \
+             patch.object(doctor_mod, "_java_runtime_available",
                           return_value=java_result), \
              patch(
                  "nanometa_live.core.workflow.bundle_manager"
@@ -344,3 +363,62 @@ class TestNextflowRuntimeCached:
         from nanometa_live.cli.prepare import nextflow_runtime_cached
         ok, where = nextflow_runtime_cached("not found", nxf_home=str(tmp_path))
         assert ok is False and "unknown" in where
+
+
+class TestNfSchemaPluginCached:
+    """nf-schema 3.0.0 (2026-10-29): the doctor says whether the plugin the
+    pipeline pins is in the Nextflow plugin cache, which a GUI Start seeds
+    each run's NXF_HOME from and a bundle export copies."""
+
+    def _checkout(self, tmp_path, pin="3.0.0"):
+        co = tmp_path / "nanometanf"; co.mkdir()
+        (co / "nextflow.config").write_text(
+            "plugins {\n    id 'nf-schema@%s' // validation\n}\n" % pin)
+        return co
+
+    def test_pin_is_read_from_the_checkout(self, tmp_path):
+        from nanometa_live.cli.prepare import nf_schema_pin
+        assert nf_schema_pin(self._checkout(tmp_path, "3.0.0")) == "3.0.0"
+        assert nf_schema_pin(tmp_path / "missing") is None
+
+    def test_cached_version_matches_the_pin(self, tmp_path):
+        from nanometa_live.cli.prepare import nf_schema_plugin_status
+        plugins = tmp_path / "plugins"; (plugins / "nf-schema-3.0.0").mkdir(parents=True)
+        (plugins / "nf-schema-2.7.3").mkdir()
+        required, cached, home = nf_schema_plugin_status(
+            self._checkout(tmp_path), plugins_home=plugins)
+        assert required == "3.0.0" and cached == ["2.7.3", "3.0.0"] and home == plugins
+
+    def test_missing_plugin_is_a_warning_with_the_install_command(self, tmp_path, capsys):
+        import argparse
+        from nanometa_live.cli import prepare
+        plugins = tmp_path / "plugins"; (plugins / "nf-schema-2.7.3").mkdir(parents=True)
+        rows = []
+        def report(name, ok, message, hint=None, fatal=True):
+            rows.append((name, ok, message, hint, fatal))
+        import nanometa_live.core.workflow.bundle_manager as bm
+        orig = bm._nextflow_plugins_home
+        bm._nextflow_plugins_home = lambda: plugins
+        try:
+            prepare._doctor_check_nf_schema_plugin(
+                argparse.Namespace(pipeline=str(self._checkout(tmp_path))), report)
+        finally:
+            bm._nextflow_plugins_home = orig
+        assert len(rows) == 1
+        name, ok, message, hint, fatal = rows[0]
+        assert name == "nf-schema plugin" and ok is False and fatal is False
+        assert "3.0.0 required" in message and "2.7.3" in message
+        assert "nextflow plugin install nf-schema@3.0.0" in hint
+
+    def test_no_checkout_is_informational(self, tmp_path, capsys, monkeypatch):
+        import argparse
+        from nanometa_live.cli import prepare
+        monkeypatch.setenv("NXF_ASSETS", str(tmp_path / "no-assets"))
+        monkeypatch.setenv("NXF_PLUGINS_DIR", str(tmp_path / "no-plugins"))
+        rows = []
+        prepare._doctor_check_nf_schema_plugin(
+            argparse.Namespace(pipeline=None),
+            lambda *a, **k: rows.append(a))
+        assert rows == []
+        out = capsys.readouterr().out
+        assert "nf-schema plugin" in out and "pipeline pin not known" in out
