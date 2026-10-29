@@ -6,6 +6,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`nanometa-prepare doctor` row "nf-schema plugin".** nanometanf pins an
+  nf-schema version (3.0.0 since 2026-10-29) and Nextflow fetches it from
+  registry.nextflow.io when the plugin cache lacks it. Two paths depend on
+  the cache rather than the network: a GUI Start seeds each run's `NXF_HOME`
+  from `~/.nextflow` and a bundle export copies `nf-schema-<ver>` from the
+  cache, so a build machine without it shipped an air-gapped bundle that
+  failed at the registry probe. The row reads the pin from the checkout
+  (`--pipeline`, else the default pulled checkout under `NXF_ASSETS` /
+  `NXF_HOME/assets` / `~/.nextflow/assets`), lists the cached versions and
+  names the one command to run while online. `_seed_nextflow_home` now links
+  `plugins/` beside `framework/` and `capsule/`, so the cached plugin is what
+  a per-run home sees. The log scanner also recognises nf-schema's
+  "Value is [string] but should be [integer]" as a wrong-typed parameter.
+
 ### Fixed
 
 - Four places where the dashboard rendered less than it knew (field audit

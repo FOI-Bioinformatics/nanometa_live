@@ -1285,11 +1285,17 @@ None of this touches the runtime path — pipelines run normally under
 4.0.2 and 4.2.1. `nf_core_version` in nanometanf's `.nf-core.yml` records the template
 version the pipeline was last synced to, not which tool to run. It reads
 4.2.1 since the 2026-10-29 hand sync (the repository has no TEMPLATE
-branch for `nf-core pipelines sync`), which brought nf-schema 2.7.3, the
-template's pinned `utils_*` subworkflows, the help flags into the schema
-subworkflow and the end of `hook_url`. nf-schema 2.7 validates `false`
-values it used to skip, so a non-boolean parameter must never be sent as
-`false`; the GUI's generated parameters were checked against the schema.
+branch for `nf-core pipelines sync`), which brought the template's pinned
+`utils_*` subworkflows, the help flags into the schema subworkflow and the
+end of `hook_url`; the same day the pipeline moved one step past the
+template to **nf-schema 3.0.0** with the `utils_*` subworkflows at
+nf-core/modules master. nf-schema 2.7+ validates `false` values it used to
+skip, so a non-boolean parameter must never be sent as `false` (cancel a
+profile's `input` with `null`); the GUI's generated parameters were
+checked against the schema. The plugin must be in the Nextflow plugin
+cache for a Start or a bundle export to work offline:
+`nanometa-prepare doctor` has a row for it, and `_seed_nextflow_home`
+links `plugins/` into each per-run `NXF_HOME`.
 
 The 25.10.x watchPath JVM cleanup hang (the historical reason for the
 `NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0.

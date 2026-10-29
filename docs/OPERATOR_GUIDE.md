@@ -157,12 +157,16 @@ conda env create -f nanometa_live_env.yml      # app deps, Nextflow, Java, BLAST
 conda activate nanometa_live_env
 pip install --no-deps "nanometa-live @ git+https://github.com/FOI-Bioinformatics/nanometa_live@<release>"
 nextflow -version                               # caches the Nextflow runtime for offline starts
+nextflow plugin install nf-schema@3.0.0         # caches the plugin nanometanf pins (see the doctor row)
 nanometa-prepare doctor                         # must report no failures
 ```
 
 `nanometa-prepare doctor` checks Python, Java, Nextflow and its version
-floor, the cached Nextflow runtime, conda and the container runtimes. Fix
-anything it reports while you still have a connection.
+floor, the cached Nextflow runtime, the cached nf-schema plugin against the
+version the pipeline pins, conda and the container runtimes. Fix anything it
+reports while you still have a connection. The plugin row needs a pipeline
+checkout to read the pin from: pass `--pipeline <path>` or run
+`nextflow pull foi-bioinformatics/nanometanf -r dev` first.
 
 ### Before you leave: pre-departure checklist
 

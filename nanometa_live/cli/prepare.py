@@ -360,6 +360,7 @@ def _doctor(args):
     _doctor_check_toolchain(report)
     _doctor_check_runtimes(report)
     _doctor_check_pipeline(args, report)
+    _doctor_check_nf_schema_plugin(args, report)
     _doctor_check_data_dirs(args, report)
     _doctor_summarise(problems)
 
@@ -526,6 +527,95 @@ def _doctor_check_pipeline(args, report):
             f"  {_DIM}INFO{_RESET}  {'Pipeline checkout':<22} "
             "not checked (pass --pipeline <path> to verify a local checkout)"
         )
+
+_NF_SCHEMA_PIN_RE = r"id\s+['\"]nf-schema@([^'\"]+)['\"]"
+
+
+def nf_schema_pin(pipeline_dir):
+    """The nf-schema version a nanometanf checkout declares, or None.
+
+    Read from ``plugins { id 'nf-schema@X.Y.Z' }`` in the checkout's
+    ``nextflow.config``; None when the checkout or the line is absent.
+    """
+    import re
+
+    cfg = os.path.join(str(pipeline_dir), "nextflow.config")
+    try:
+        with open(cfg, encoding="utf-8", errors="replace") as fh:
+            m = re.search(_NF_SCHEMA_PIN_RE, fh.read())
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
+def default_pipeline_checkout():
+    """Where ``nextflow pull foi-bioinformatics/nanometanf`` lands by default.
+
+    ``NXF_ASSETS``, else ``$NXF_HOME/assets``, else ``~/.nextflow/assets``;
+    None when no checkout with a ``nextflow.config`` is there.
+    """
+    assets = os.environ.get("NXF_ASSETS")
+    if not assets:
+        nxf_home = os.environ.get("NXF_HOME") or os.path.join(
+            os.path.expanduser("~"), ".nextflow")
+        assets = os.path.join(nxf_home, "assets")
+    checkout = os.path.join(assets, "foi-bioinformatics", "nanometanf")
+    return checkout if os.path.isfile(
+        os.path.join(checkout, "nextflow.config")) else None
+
+
+def nf_schema_plugin_status(pipeline_dir=None, plugins_home=None):
+    """What the Nextflow plugin cache holds against what the pipeline pins.
+
+    Returns ``(required, cached, plugins_home)``: ``required`` is the version
+    the checkout pins (None when no checkout is known), ``cached`` the sorted
+    nf-schema versions present under ``plugins_home`` (the directory the
+    bundle exporter also reads: ``NXF_PLUGINS_DIR``, else ``$NXF_HOME/plugins``,
+    else ``~/.nextflow/plugins``).
+    """
+    from nanometa_live.core.workflow.bundle_manager import _nextflow_plugins_home
+
+    home = Path(plugins_home) if plugins_home else _nextflow_plugins_home()
+    cached = []
+    if home.is_dir():
+        for entry in home.iterdir():
+            if entry.is_dir() and entry.name.startswith("nf-schema-"):
+                cached.append(entry.name[len("nf-schema-"):])
+    required = nf_schema_pin(pipeline_dir) if pipeline_dir else None
+    return required, sorted(cached), home
+
+
+def _doctor_check_nf_schema_plugin(args, report):
+    """The nf-schema plugin the pipeline pins must be in the plugin cache.
+
+    nanometanf declares ``plugins { id 'nf-schema@X' }`` and Nextflow fetches
+    that version from registry.nextflow.io when it is not cached. Two paths
+    depend on the cache rather than the network: a GUI Start seeds its
+    per-run NXF_HOME from ``~/.nextflow`` (plugins included), and a bundle
+    export copies ``nf-schema-<X>`` from this directory into the bundle. A
+    build machine without it ships an air-gapped bundle that fails at the
+    registry probe. Non-fatal online; the hint is one command.
+    """
+    pipeline_dir = args.pipeline or default_pipeline_checkout()
+    required, cached, home = nf_schema_plugin_status(pipeline_dir)
+    cached_text = ", ".join(cached) if cached else "none"
+    if required is None:
+        print(
+            f"  {_DIM}INFO{_RESET}  {'nf-schema plugin':<22} "
+            f"pipeline pin not known (no checkout found); cached: {cached_text}"
+        )
+        return
+    ok = required in cached
+    report(
+        "nf-schema plugin", ok,
+        f"{required} required by {pipeline_dir}; cached: {cached_text}",
+        f"Run `nextflow plugin install nf-schema@{required}` once while "
+        f"online. The plugin lands under {home}; a Start seeds each run's "
+        "NXF_HOME from there and a bundle export copies it, so without it an "
+        "air-gapped machine reaches for registry.nextflow.io and fails.",
+        fatal=False,
+    )
+
 
 def _doctor_check_data_dirs(args, report):
     """Report the data directories; _ensure_data_dirs already created them."""
