@@ -28,6 +28,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`sample_name` is sent to the pipeline as a string.** A YAML
+  `sample_name: 7` loaded as an int and reached nanometanf's `InputDetector`,
+  which takes a String. The mapping coerces it; a digit-only name such as
+  `007` is sent verbatim (nanometanf 1.12.0dev accepts it, and keeps it).
+
 - Four places where the dashboard rendered less than it knew (field audit
   2026-10-28, M1, M2, M3, M8). A loader exception during a run showed a
   calm grey STANDBY; it is now the amber RESULTS UNREADABLE state with the

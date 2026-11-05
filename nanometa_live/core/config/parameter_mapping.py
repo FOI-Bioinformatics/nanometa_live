@@ -1293,7 +1293,13 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     # Get processing mode and sample handling configuration
     processing_mode = config.get("processing_mode", "batch")
     sample_handling = config.get("sample_handling", "by_barcode")
-    sample_name = config.get("sample_name", "sample")
+    # Sent as a string whatever the config carried: a YAML `sample_name: 7`
+    # loads as an int, and nanometanf's InputDetector takes a String. (A
+    # digit-only name is fine on the pipeline side since nanometanf
+    # 1.12.0dev typed the parameter string-or-integer; before that nf-schema
+    # cast "007" to 7 for its type check and refused it.)
+    raw_sample_name = config.get("sample_name", "sample")
+    sample_name = "sample" if raw_sample_name is None else str(raw_sample_name)
 
     logging.info(f"Processing mode: {processing_mode}, Sample handling: {sample_handling}")
     logging.info(f"Input directory: {nanopore_dir}")
