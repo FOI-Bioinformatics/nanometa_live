@@ -473,3 +473,19 @@ class TestRealtimeTimeoutNullMeansIndefinite:
 
         params = create_nextflow_params(cfg)
         assert params["realtime_timeout_minutes"] == 60
+
+
+class TestSampleNameIsSentAsAString:
+    """nanometanf's InputDetector takes a String; a YAML `sample_name: 7` is an int."""
+
+    def test_integer_sample_name_is_sent_as_a_string(self, base_config):
+        base_config["processing_mode"] = "realtime"
+        base_config["sample_name"] = 7
+        params = create_nextflow_params(base_config)
+        assert params["sample_name"] == "7"
+
+    def test_digit_only_sample_name_keeps_its_leading_zero(self, base_config):
+        base_config["processing_mode"] = "realtime"
+        base_config["sample_name"] = "007"
+        params = create_nextflow_params(base_config)
+        assert params["sample_name"] == "007"
