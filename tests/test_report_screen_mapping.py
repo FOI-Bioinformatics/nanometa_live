@@ -313,6 +313,26 @@ class TestTheBannerRespectsTheEntryThreshold:
 
         assert "ACTION REQUIRED" in html
 
+    def test_a_mapped_gtdb_detection_renders_action_required(self, generator):
+        """The whole chain: mapping -> screen row -> banner.
+
+        This is the state the audit observed rendering the green banner: a
+        flextaxd database, an NCBI-taxid watchlist entry, and reads on the
+        grafted node.
+        """
+        set_mapping_collection(_collection_mapping_1392_to_node())
+        with patch(_MGR_PATH, return_value=_mock_manager(_anthracis_entry(10))):
+            rows = generator._screen_watchlist(_gtdb_frame())
+
+        html = self._render_banner().render(data={
+            "watched_results": rows, "total_reads": 1000,
+            "low_read_floor": 10,
+        })
+
+        assert "ACTION REQUIRED" in html
+        assert "banner-safe" not in html
+        assert "NO WATCHED ORGANISMS DETECTED" not in html
+
     def test_the_screen_row_carries_the_verdict(self, generator):
         entries = _anthracis_entry(threshold=1000)
         with patch(_MGR_PATH, return_value=_mock_manager(entries)):
