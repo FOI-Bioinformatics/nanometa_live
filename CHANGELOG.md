@@ -41,6 +41,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Apply); a tab without it, or holding another folder, still receives the
   live config wholesale.
 
+- **The alert engine receives the run's real state.** `_generate_alerts`
+  read `running`, `completed`, `error_count`, `pending_files` and
+  `processed_files` off the overall-status dict, which nothing wrote, so
+  the completion, error and backlog alerts could never fire (bug audit
+  2026-11-06, item 37). `compute_overall_status_cache` now merges
+  `run_status_for_alerts(backend_status)` into the cache, translating the
+  backend's `files_processed` / `files_waiting` / `errors` to the engine's
+  names. The dead `active_alerts` key, "calculated later" by nothing, is
+  gone.
+
 - **`sample_name` is sent to the pipeline as a string.** A YAML
   `sample_name: 7` loaded as an int and reached nanometanf's `InputDetector`,
   which takes a String. The mapping coerces it; a digit-only name such as

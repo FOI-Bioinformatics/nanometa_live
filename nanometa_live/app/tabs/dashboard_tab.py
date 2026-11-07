@@ -79,6 +79,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     _format_time_elapsed,
     _collect_samples_data,
     _generate_alerts,
+    run_status_for_alerts,
     _estimate_pass_rate_from_quality,
     _estimate_classified_rate,
     _get_alerts_badge_color,
@@ -210,6 +211,10 @@ def register_dashboard_callbacks(app: Dash):
             available_samples = _resolve_samples(main_dir, available_samples)
             pipeline_running = status.get("running", False)
             overall_status = _calculate_overall_status(main_dir, config, available_samples, pipeline_running)
+            # The alert engine's run-state inputs (completion, error and
+            # backlog alerts) come from the backend status this callback
+            # already holds; _generate_alerts reads them off this dict.
+            overall_status.update(run_status_for_alerts(status))
             # Include main_dir and samples_data so downstream callbacks don't recompute
             overall_status["_main_dir"] = main_dir
             overall_status["_samples_data"] = _collect_samples_data(main_dir, available_samples)

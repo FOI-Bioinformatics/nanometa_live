@@ -154,6 +154,81 @@ def test_overall_status_cache_populated(dash_app, populated_dir):
     assert "_samples_data" in result
 
 
+class TestStatusCacheCarriesRunStateForAlerts:
+    """Bug audit 2026-11-06, item 37: ``_generate_alerts`` read
+    ``running`` / ``completed`` / ``error_count`` / ``pending_files`` /
+    ``processed_files`` off the overall-status dict, which nothing wrote, so
+    the alert engine saw a run that never completed and never erred. The
+    cache now carries them from the backend status, under the engine's
+    names."""
+
+    COMPLETED = {"running": False, "completed": True, "files_processed": 12,
+                 "files_waiting": 3, "errors": ["e1", "e2"]}
+
+    def _cache(self, dash_app, populated_dir, status):
+        fn = get_callback_fn(dash_app, "dashboard-overall-status-cache")
+        with ctx_trigger("results-fingerprint"):
+            return fn("fp-alerts", 0,
+                      {"results_output_directory": populated_dir},
+                      status, ["All Samples"])
+
+    def test_cache_translates_the_backend_status_keys(self, dash_app, populated_dir):
+        cache = self._cache(dash_app, populated_dir, self.COMPLETED)
+        assert cache["running"] is False
+        assert cache["completed"] is True
+        assert cache["processed_files"] == 12
+        assert cache["pending_files"] == 3
+        assert cache["error_count"] == 2
+        assert "active_alerts" not in cache, "dead key, computed by nothing"
+
+    def test_completed_run_yields_the_completion_alert(self, dash_app, populated_dir):
+        from nanometa_live.app.tabs import dashboard_helpers
+        from nanometa_live.app.tabs.dashboard_helpers import _generate_alerts
+        from nanometa_live.core.utils.alert_engine import AlertEngine
+
+        cache = self._cache(dash_app, populated_dir, self.COMPLETED)
+        with patch.object(dashboard_helpers, "get_alert_engine",
+                          return_value=AlertEngine()), \
+             patch.object(dashboard_helpers, "_get_active_watchlist_entries",
+                          return_value=[]):
+            alerts = _generate_alerts(
+                cache, populated_dir,
+                {"results_output_directory": populated_dir},
+                cache["_samples_data"],
+            )
+        completion = [a for a in alerts if a.get("category") == "completion"]
+        assert completion, [a.get("message") for a in alerts]
+        assert "Analysis completed" in completion[0]["message"]
+
+    def test_running_run_yields_no_completion_alert(self, dash_app, populated_dir):
+        from nanometa_live.app.tabs import dashboard_helpers
+        from nanometa_live.app.tabs.dashboard_helpers import _generate_alerts
+        from nanometa_live.core.utils.alert_engine import AlertEngine
+
+        cache = self._cache(dash_app, populated_dir,
+                            {"running": True, "completed": False,
+                             "files_processed": 4, "files_waiting": 0,
+                             "errors": []})
+        with patch.object(dashboard_helpers, "get_alert_engine",
+                          return_value=AlertEngine()), \
+             patch.object(dashboard_helpers, "_get_active_watchlist_entries",
+                          return_value=[]):
+            alerts = _generate_alerts(
+                cache, populated_dir,
+                {"results_output_directory": populated_dir},
+                cache["_samples_data"],
+            )
+        assert not [a for a in alerts if a.get("category") == "completion"]
+
+
+def test_run_status_for_alerts_tolerates_a_missing_status():
+    from nanometa_live.app.tabs.dashboard_helpers import run_status_for_alerts
+    assert run_status_for_alerts(None) == {
+        "running": False, "completed": False, "error_count": 0,
+        "pending_files": 0, "processed_files": 0,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # handle_sample_selection
 # --------------------------------------------------------------------------- #
