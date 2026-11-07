@@ -823,3 +823,53 @@ class TestUnstableBlastTsvIsSkipped:
         p = ValidationParser(str(tmp_path))
         results = p.get_validation_results()
         assert [r for r in results if r.validation_method == "blast"]
+
+
+class TestUnstableSkipIsNotCached:
+    """A skip inside the stability window must not freeze the result cache.
+
+    Audit 2026-11-06, finding 10: the parser cached the result list under a
+    directory fingerprint that already included the skipped file's mtime.
+    The file then aged past the window -- which changes no mtime -- and
+    every later read answered from the cache without it, so a BLAST pair
+    caught mid-rewrite in a real-time run disappeared until another file
+    changed. The kraken loaders mark such a poll transient; the parser now
+    does the same (``StabilitySkips``).
+    """
+
+    def _pair(self, tmp_path, sample, age_seconds):
+        vdir = tmp_path / "validation" / "blast"
+        vdir.mkdir(parents=True, exist_ok=True)
+        f = vdir / f"{sample}_taxid562.blast.tsv"
+        _write_blast(f, ROWS_12)
+        t = time.time() - age_seconds
+        os.utime(f, (t, t))
+
+    @staticmethod
+    def _let_window_pass(monkeypatch, seconds=5.0):
+        # Advance the clock the stability check reads; no mtime changes,
+        # exactly as on a live run.
+        from nanometa_live.core.utils import loader_utils
+        real = time.time
+        monkeypatch.setattr(loader_utils.time, "time", lambda: real() + seconds)
+
+    def test_skipped_pair_appears_once_stable(self, tmp_path, monkeypatch):
+        self._pair(tmp_path, "barcode01", age_seconds=120)
+        self._pair(tmp_path, "barcode02", age_seconds=0)   # just landed
+        p = ValidationParser(str(tmp_path))
+        first = sorted(r.sample_id for r in p.get_validation_results())
+        assert first == ["barcode01"], "precondition: the young file is skipped"
+
+        self._let_window_pass(monkeypatch)
+        second = sorted(r.sample_id for r in p.get_validation_results())
+        assert second == ["barcode01", "barcode02"], (
+            "the reduced result was cached under a fingerprint that already "
+            "included the skipped file, so the pair never appeared"
+        )
+
+    def test_settled_tree_is_still_cached(self, tmp_path):
+        self._pair(tmp_path, "barcode01", age_seconds=120)
+        self._pair(tmp_path, "barcode02", age_seconds=120)
+        p = ValidationParser(str(tmp_path))
+        p.get_validation_results()
+        assert p._results_cache is not None, "a result with no skip must be cached"

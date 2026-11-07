@@ -47,7 +47,7 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 import pandas as pd
 
-from nanometa_live.core.utils.loader_utils import _is_file_stable
+from nanometa_live.core.utils.loader_utils import StabilitySkips
 
 logger = logging.getLogger(__name__)
 
@@ -557,7 +557,10 @@ class ValidationParser:
             result.status = ValidationStatus.FAILED
             return result
 
-    def _enrich_blast_identity_range(self, results: List['ValidationResult']) -> None:
+    def _enrich_blast_identity_range(
+        self, results: List['ValidationResult'],
+        skips: Optional[StabilitySkips] = None,
+    ) -> None:
         """Fill identity min/max + mean alignment length for BLAST results.
 
         The aggregate ``validation_results.json`` carries only mean identity, so
@@ -567,6 +570,8 @@ class ValidationParser:
         in place from its tsv when present. Mutates ``results``; no-op when the
         tsv is missing (e.g. minimap2-only runs) so it never fabricates data.
         """
+        if skips is None:
+            skips = StabilitySkips()
         blast_dir = self.results_dir / 'validation' / 'blast'
         if not blast_dir.is_dir():
             return
@@ -580,7 +585,7 @@ class ValidationParser:
                 continue
             # Mid-write files are skipped (see the disk-scan gate): partial
             # identity ranges are worse than the aggregate's own values.
-            if not _is_file_stable(str(tsv)):
+            if not skips.is_stable(str(tsv)):
                 continue
             detail = self.parse_blast_tabular(tsv, r.sample_id, r.taxid, r.total_reads)
             if detail.percent_identity_max:
@@ -754,6 +759,10 @@ class ValidationParser:
         # + get_validation_summary triple inside the same tick reuses
         # one parse rather than three.
         cache_this_call = sample is None and taxid is None
+        # A file skipped inside its stability window returns when the
+        # window passes, which changes no mtime and so no fingerprint; a
+        # result built with such a skip must not be cached (finding 10).
+        skips = StabilitySkips()
         results = []
 
         if not self.validation_dir or not self.validation_dir.exists():
@@ -787,7 +796,7 @@ class ValidationParser:
             if aggregate_results:
                 # The aggregate JSON omits identity range + alignment length;
                 # enrich BLAST results from their blast.tsv when available.
-                self._enrich_blast_identity_range(aggregate_results)
+                self._enrich_blast_identity_range(aggregate_results, skips)
                 results.extend(aggregate_results)
                 # One aggregate JSON is authoritative; stop at the first match.
                 break
@@ -887,7 +896,7 @@ class ValidationParser:
                 # validated_reads drops and a CONFIRMED organism transiently
                 # flips to UNCERTAIN. Skip it this poll -- the pair appears
                 # one tick later instead, which is invisible (round 3).
-                if not _is_file_stable(str(blast_file)):
+                if not skips.is_stable(str(blast_file)):
                     continue
 
                 # Parse tabular file
@@ -986,7 +995,7 @@ class ValidationParser:
         self._attach_genome_breadth(results)
 
         logger.info(f"Retrieved {len(results)} validation results")
-        if cache_this_call:
+        if cache_this_call and not skips.skipped:
             self._results_cache = list(results)
             self._results_cache_mtime = fingerprint
         return results

@@ -20,10 +20,10 @@ from nanometa_live.core.utils.sample_detector import (
 )
 from nanometa_live.core.utils.loader_utils import (
     _get_cache_key,
-    _check_mtime_cache,
-    _mtime_cache_state,
+    _mtime_cache_lookup,
     _store_mtime_cache,
     _is_file_stable,
+    StabilitySkips,
 )
 
 
@@ -75,19 +75,24 @@ def _find_sample_files(directory: str, sample: str, extensions: List[str]) -> Li
     return files
 
 
-def _aggregate_fastp_files(fastp_files: List[str]) -> Dict[str, Any]:
+def _aggregate_fastp_files(
+    fastp_files: List[str], skips: Optional[StabilitySkips] = None
+) -> Dict[str, Any]:
     """Aggregate FASTP statistics across one or more fastp.json files.
 
     Stable files are parsed and validated; unstable, malformed, or
     unreadable files are skipped. The q30 rate is recomputed from the
-    accumulated post-filtering q30 and total bases.
+    accumulated post-filtering q30 and total bases. A stability skip is
+    recorded on ``skips`` so the caller knows the total is transient.
     """
     aggregated_stats = _empty_fastp_stats()
     acc_q30_bases = 0
+    if skips is None:
+        skips = StabilitySkips()
 
     for fastp_file in fastp_files:
         try:
-            if not _is_file_stable(fastp_file):
+            if not skips.is_stable(fastp_file):
                 logging.debug(f"Skipping unstable file: {fastp_file}")
                 continue
 
@@ -162,14 +167,15 @@ def load_fastp_per_sample(main_dir: str) -> List[Dict[str, Any]]:
         return []
 
     mtime_key = f"fastp_per_sample:{main_dir}"
-    cached = _check_mtime_cache(mtime_key, [fastp_dir])
-    if cached is not None:
+    state, cached, fingerprint = _mtime_cache_lookup(mtime_key, [fastp_dir])
+    if state == "hit":
         return list(cached)
 
+    skips = StabilitySkips()
     rows: List[Dict[str, Any]] = []
     for fastp_file in glob.glob(os.path.join(fastp_dir, "*.fastp.json")):
         try:
-            if not _is_file_stable(fastp_file):
+            if not skips.is_stable(fastp_file):
                 continue
             with open(fastp_file, "r") as f:
                 payload = json.load(f)
@@ -187,7 +193,10 @@ def load_fastp_per_sample(main_dir: str) -> List[Dict[str, Any]]:
             logging.debug(f"load_fastp_per_sample skipping {fastp_file}: {exc}")
             continue
 
-    _store_mtime_cache(mtime_key, [fastp_dir], list(rows))
+    # A row skipped for instability returns once the window passes, which
+    # changes no mtime: the reduced list must not be cached (finding 10).
+    if not skips.skipped:
+        _store_mtime_cache(mtime_key, [fastp_dir], list(rows), fingerprint=fingerprint)
     return rows
 
 
@@ -211,9 +220,10 @@ def load_fastp_card_payloads(
         return []
 
     mtime_key = f"fastp_cards:{_get_cache_key(main_dir, sample)}"
-    cached = _check_mtime_cache(mtime_key, [fastp_dir])
-    if cached is not None:
+    state, cached, fingerprint = _mtime_cache_lookup(mtime_key, [fastp_dir])
+    if state == "hit":
         return list(cached)
+    skips = StabilitySkips()
 
     if sample is None or sample == "All Samples":
         files = sorted(glob.glob(os.path.join(fastp_dir, "*.fastp.json")))
@@ -224,7 +234,7 @@ def load_fastp_card_payloads(
     payloads: List[Dict[str, Any]] = []
     for fastp_file in files:
         try:
-            if not _is_file_stable(fastp_file):
+            if not skips.is_stable(fastp_file):
                 continue
             with open(fastp_file, "r") as f:
                 payload = json.load(f)
@@ -242,7 +252,8 @@ def load_fastp_card_payloads(
                 f"load_fastp_card_payloads skipping {fastp_file}: {exc}")
             continue
 
-    _store_mtime_cache(mtime_key, [fastp_dir], list(payloads))
+    if not skips.skipped:
+        _store_mtime_cache(mtime_key, [fastp_dir], list(payloads), fingerprint=fingerprint)
     return payloads
 
 
@@ -286,8 +297,8 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
     # Fast mtime-based check: skip parsing if fastp directory is unchanged
     fastp_cache_key = _get_cache_key(main_dir, sample)
     mtime_key = f"fastp:{fastp_cache_key}"
-    mtime_cached = _check_mtime_cache(mtime_key, [fastp_dir])
-    if mtime_cached is not None:
+    state, mtime_cached, fingerprint = _mtime_cache_lookup(mtime_key, [fastp_dir])
+    if state == "hit":
         logging.debug(f"Mtime cache hit for FASTP data: {fastp_cache_key}")
         return mtime_cached.copy() if isinstance(mtime_cached, dict) else mtime_cached
 
@@ -306,8 +317,14 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
             logging.warning(f"No FASTP files found for sample {sample}")
             return _empty_fastp_stats()
 
-    aggregated_stats = _aggregate_fastp_files(fastp_files)
-    _store_mtime_cache(mtime_key, [fastp_dir], aggregated_stats.copy())
+    skips = StabilitySkips()
+    aggregated_stats = _aggregate_fastp_files(fastp_files, skips)
+    # In batch mode the last fastp JSON written lands inside the stability
+    # window of the poll that first sees it; cached, the reduced total
+    # stayed until something else changed under fastp/ (finding 10).
+    if not skips.skipped:
+        _store_mtime_cache(mtime_key, [fastp_dir], aggregated_stats.copy(),
+                           fingerprint=fingerprint)
     return aggregated_stats
 
 
@@ -388,9 +405,10 @@ def load_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str
     # per sample per tick plus twice more for the quality estimate
     # (round-2 audit, 2026-08-22).
     mtime_key = f"nanoplot:{_get_cache_key(main_dir, sample)}"
+    fingerprint = None
     if os.path.exists(nanoplot_dir):
-        cached = _check_mtime_cache(mtime_key, [nanoplot_dir])
-        if cached is not None:
+        state, cached, fingerprint = _mtime_cache_lookup(mtime_key, [nanoplot_dir])
+        if state == "hit":
             return cached.copy() if isinstance(cached, dict) else cached
 
     nanostats_files = []
@@ -457,7 +475,8 @@ def load_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str
     if file_count > 0:
         aggregated['source'] = 'nanoplot'
 
-    _store_mtime_cache(mtime_key, [nanoplot_dir], dict(aggregated))
+    _store_mtime_cache(mtime_key, [nanoplot_dir], dict(aggregated),
+                       fingerprint=fingerprint)
     return aggregated
 
 
@@ -675,17 +694,24 @@ def load_seqkit_stats(main_dir: str, sample: Optional[str] = None) -> pd.DataFra
 
     mtime_key = f"seqkit:{_get_cache_key(main_dir, sample)}"
     fingerprint_paths = _seqkit_fingerprint_paths(seqkit_dir, sample)
-    state, cached = _mtime_cache_state(mtime_key, fingerprint_paths)
+    state, cached, fingerprint = _mtime_cache_lookup(mtime_key, fingerprint_paths)
     if state == "hit":
         return cached
 
-    result = _load_seqkit_stats_uncached(main_dir, seqkit_dir, sample)
-    _store_mtime_cache(mtime_key, fingerprint_paths, result)
+    skips = StabilitySkips()
+    result = _load_seqkit_stats_uncached(main_dir, seqkit_dir, sample, skips)
+    # A batch TSV skipped inside its stability window is summed once the
+    # window passes, which changes no mtime: a total built without it must
+    # not enter the mtime cache (finding 10).
+    if not skips.skipped:
+        _store_mtime_cache(mtime_key, fingerprint_paths, result,
+                           fingerprint=fingerprint)
     return result
 
 
 def _load_seqkit_stats_uncached(
-    main_dir: str, seqkit_dir: str, sample: Optional[str]
+    main_dir: str, seqkit_dir: str, sample: Optional[str],
+    skips: Optional[StabilitySkips] = None,
 ) -> pd.DataFrame:
     """Read and aggregate seqkit TSVs, bypassing the mtime cache."""
     incremental = _is_incremental_seqkit_layout(seqkit_dir, sample)
@@ -698,7 +724,7 @@ def _load_seqkit_stats_uncached(
         tsv_files = _find_sample_files(seqkit_dir, sample, ["tsv"])
 
     if incremental:
-        incremental_df = _load_seqkit_incremental(seqkit_dir, sample)
+        incremental_df = _load_seqkit_incremental(seqkit_dir, sample, skips)
         if not incremental_df.empty:
             if tsv_files:
                 # A flat TSV exists for some samples but not the incremental
@@ -742,7 +768,8 @@ def _read_seqkit_tsvs(tsv_files: List[str]) -> pd.DataFrame:
 
 
 def _load_seqkit_incremental(
-    seqkit_dir: str, sample: Optional[str] = None
+    seqkit_dir: str, sample: Optional[str] = None,
+    skips: Optional[StabilitySkips] = None,
 ) -> pd.DataFrame:
     """
     Aggregate per-batch seqkit TSVs into a single cumulative row per sample.
@@ -809,8 +836,14 @@ def _load_seqkit_incremental(
         per_batch: List[pd.DataFrame] = []
         for batch_file in batch_files:
             df = load_batch_frame(batch_file)
-            if df is not None:
-                per_batch.append(df)
+            if df is None:
+                # The cache returns None for an unstable file and for a
+                # corrupt one alike; only the former heals without a
+                # rewrite, so only it marks the result transient.
+                if skips is not None:
+                    skips.is_stable(batch_file)
+                continue
+            per_batch.append(df)
 
         if not per_batch:
             continue
