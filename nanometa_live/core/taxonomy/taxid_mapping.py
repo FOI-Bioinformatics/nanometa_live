@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from nanometa_live.core.taxonomy.database_profile import DatabaseProfile
+from nanometa_live.core.utils.atomic_write import atomic_write_json
 from nanometa_live.core.taxonomy.pseudo_taxid import stable_pseudo_taxid
 
 logger = logging.getLogger(__name__)
@@ -629,12 +630,18 @@ class TaxidMappingCollection:
         return collection
 
     def save(self, filepath: str) -> bool:
-        """Save collection to JSON file."""
+        """Save collection to JSON file, atomically.
+
+        ``open(path, "w")`` truncates first, so a crash or a second process
+        reading mid-write saw a truncated file -- and a truncated mappings
+        file does not fail loudly: ``load`` returns None and every entry
+        reads UNMAPPED, i.e. "this organism is not in the database", which
+        is a negative result the operator may act on (audit 2026-11-06,
+        finding 34). This file also carries the operator's manual
+        verifications, which nothing else can reconstruct.
+        """
         try:
-            path = Path(filepath)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, 'w') as f:
-                json.dump(self.to_dict(), f, indent=2)
+            atomic_write_json(filepath, self.to_dict())
             logger.info(f"Saved mapping collection to {filepath}")
             return True
         except (FileNotFoundError, PermissionError, OSError, TypeError, ValueError) as e:
@@ -916,10 +923,13 @@ class TaxidMapper:
                     f"Built database index: {len(self._index.by_taxid)} nodes "
                     f"in {build_time:.2f}s"
                 )
-                # Save to JSON cache for next time
+                # Save to JSON cache for next time. Atomically: a
+                # truncated index file is discarded on load and the whole
+                # database is re-indexed, which on a field laptop is minutes
+                # of startup the operator cannot account for.
                 try:
-                    with open(cache_path, 'w') as f:
-                        json.dump(self._index.to_dict(), f)
+                    atomic_write_json(cache_path, self._index.to_dict(),
+                                      indent=None)
                     logger.info(f"Saved database index to cache: {cache_path}")
                 except (FileNotFoundError, PermissionError, OSError, TypeError, ValueError) as e:
                     logger.exception(f"Failed to cache database index: {e}")
