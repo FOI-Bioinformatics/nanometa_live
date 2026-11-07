@@ -114,6 +114,35 @@ KNOWN_RECLASSIFICATIONS = {
     "mammarenavirus lassaense": ["lassa mammarenavirus", "lassa virus"],
 }
 
+# Third tokens that qualify a name without naming a subspecies. A trinomial's
+# third word is normally the subspecies epithet, but these mark a rank word, a
+# species group or a virus/strain designation -- treating them as a subspecies
+# would generate variants for an organism that does not exist ("salmonella
+# enterica subsp. serovar").
+_NON_SUBSPECIES_TOKENS = frozenset({
+    "serovar", "serotype", "serogroup", "biovar", "biotype", "genotype",
+    "pathovar", "pv", "bv", "var", "subspecies", "subsp", "subgroup",
+    "group", "complex", "clade", "lineage", "sensu", "lato", "stricto",
+    "strain", "str", "type", "virus", "phage", "bacteriophage", "sp", "spp",
+    "genomosp", "like", "unclassified", "environmental", "sample", "isolate",
+})
+
+
+def _is_subspecies_epithet(token: str) -> bool:
+    """Whether a trinomial's third word names a subspecies.
+
+    Alphabetic only, so a serovar code ("o157:h7"), a strain number or any
+    token carrying punctuation is excluded; and not one of the rank/group
+    words above.
+    """
+    word = (token or "").strip().lower()
+    return (
+        len(word) >= 3
+        and word.isalpha()
+        and word not in _NON_SUBSPECIES_TOKENS
+    )
+
+
 # Genus-level reclassifications (for suggesting alternatives)
 GENUS_RECLASSIFICATIONS = {
     "shigella": "escherichia",  # All Shigella species are in Escherichia in GTDB
@@ -159,6 +188,14 @@ class NormalizedName:
             trinomial = f"{genus} {epithet} {subsp}"
             if trinomial != self.canonical:
                 variants.append(trinomial)
+            # The explicit "subsp." spelling, which is how NCBI and many
+            # Kraken2 builds name an S1 node. A bare trinomial entry only
+            # generated the forms above, so against such a database it fell
+            # through to the species-only form and resolved to the parent
+            # species (audit 2026-11-06, finding 15).
+            subsp_form = f"{genus} {epithet} subsp. {subsp}"
+            if subsp_form != self.canonical:
+                variants.append(subsp_form)
             variants.append(f"{genus}_{epithet}_{subsp}")
             variants.append(f"s__{genus}_{epithet}_{subsp}")
 
@@ -391,6 +428,21 @@ class NameNormalizer:
             # Second word is species epithet unless it's an abbreviation
             if words[1] not in ABBREVIATIONS:
                 result["species_epithet"] = words[1]
+
+        # A bare trinomial IS a subspecies name. Only the explicit "subsp."
+        # spelling set this field, so "Francisella tularensis holarctica"
+        # parsed as the species plus an ignored third word: its variant list
+        # held the species-only form, VariantMatchStrategy returned the first
+        # hit, and the entry landed on the parent species node wherever the
+        # database spells its S1 node with "subsp." -- collapsing Type A and
+        # Type B onto one match (audit 2026-11-06, finding 15).
+        if (
+            result["subspecies"] is None
+            and result["species_epithet"]
+            and len(words) >= 3
+            and _is_subspecies_epithet(words[2])
+        ):
+            result["subspecies"] = words[2]
 
         return result
 
