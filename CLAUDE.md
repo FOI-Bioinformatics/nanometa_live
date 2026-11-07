@@ -895,6 +895,18 @@ negative is a missed detection. Measured saving on an NCBI database
 (13 of the 14 shipped): 156k fewer string builds per 2000 names.
 Regression-covered in `tests/test_database_profile.py`.
 
+The **live name matcher** gates the same way.
+`TaxonomyMatcher.build_entry_index(entries, generates_gtdb_variants=...)`
+indexes each entry's GTDB genus-suffix forms at the variant tier when the
+flag is set, so an NCBI watchlist name (`Bacillus anthracis`) matches a
+grafted GTDB report row (`Bacillus_A anthracis`) with no taxid mapping in
+hand -- the genus differs, so no cheaper tier bridges them. The flag comes
+from `DatabaseProfile.generates_gtdb_variants` at every call site
+(`WatchlistManager._entry_match_index`, folded into its index cache key;
+`EntryRowResolver` for the export screen; `_custom_name_resolver` for custom
+alerts) and is off by default, so the NCBI path stays cheap. Regression in
+`tests/test_gtdb_suffix_matching.py`.
+
 **flextaxd / hybrid databases are the normal case.** The in-house field
 databases (Bioshield and similar) are built with flextaxd: an NCBI
 backbone with finer-resolution clades grafted in, then minimized to fit
