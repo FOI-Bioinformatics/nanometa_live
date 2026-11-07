@@ -286,3 +286,71 @@ class TestAmpliconConcentration:
         assert cov.covered_span == 0
         assert cov.covered_start == -1
         assert cov.local_breadth == 0.0
+
+
+class TestBreadthCacheIsLocked:
+    """``_breadth_cache`` is read, scanned for eviction and written under one
+    lock. The verdict path and the Validation tab call ``paf_breadth`` from
+    different callback threads, and the eviction scan iterated the dict while
+    another thread could insert -- ``RuntimeError: dictionary changed size
+    during iteration`` on a live run is a timing accident, so the guard is
+    pinned structurally (audit 2026-11-06, 37)."""
+
+    def test_eviction_scan_and_insert_hold_the_lock(self, tmp_path, monkeypatch):
+        import os
+        import time
+        from nanometa_live.core.parsers import paf_coverage_parser as pcp
+
+        class LockedDict(dict):
+            def __iter__(self):
+                assert pcp._breadth_cache_lock.locked(), "eviction scan without the lock"
+                return super().__iter__()
+
+            def __setitem__(self, key, value):
+                assert pcp._breadth_cache_lock.locked(), "insert without the lock"
+                return super().__setitem__(key, value)
+
+        monkeypatch.setattr(pcp, "_breadth_cache", LockedDict())
+        paf = tmp_path / "b01_taxid5.paf"
+        line = "r0\t500\t0\t500\t+\tref\t1900000\t1000\t1500\t500\t500\t60\n"
+        for i in range(3):
+            paf.write_text(line * (i + 1))
+            t = time.time() - 60 + i
+            os.utime(paf, (t, t))
+            assert pcp.paf_breadth(str(paf)) is not None
+        assert len(pcp._breadth_cache) == 1
+
+    def test_concurrent_callers_do_not_raise(self, tmp_path):
+        import os
+        import threading
+        import time
+        from nanometa_live.core.parsers import paf_coverage_parser as pcp
+        pcp._breadth_cache.clear()
+        pafs = []
+        line = "r0\t500\t0\t500\t+\tref\t1900000\t1000\t1500\t500\t500\t60\n"
+        for i in range(8):
+            p = tmp_path / f"b{i:02d}_taxid5.paf"
+            p.write_text(line)
+            t = time.time() - 60
+            os.utime(p, (t, t))
+            pafs.append(str(p))
+        errors = []
+
+        def worker(idx):
+            try:
+                for k in range(40):
+                    p = pafs[(idx + k) % len(pafs)]
+                    # Rewrite in place so every call mints a new key and evicts.
+                    with open(p, "a") as fh:
+                        fh.write(line)
+                    pcp.paf_breadth(p)
+            except Exception as exc:  # pragma: no cover - the assertion target
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors, errors
+        pcp._breadth_cache.clear()

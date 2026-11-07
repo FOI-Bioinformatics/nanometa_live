@@ -1084,3 +1084,65 @@ class TestFingerprintTakenBeforeParse:
             "a store given the pre-parse fingerprint must not re-fingerprint "
             "the changed file and mask the change"
         )
+
+
+class TestLatestBatchUnreadableWinnerDoesNotFallThrough:
+    """A batch winner that cannot be read is unmeasured, not the standard report.
+
+    Audit 2026-11-06, 37: when batch candidates existed but the
+    highest-numbered one was inside its stability window (or corrupt),
+    ``load_kraken_latest_batch`` fell through to ``<sample>.kraken2.report.txt``
+    -- in the incremental layout the per-sample placeholder or the
+    whole-sample total -- and served that as the latest batch. The two are
+    different horizons; an empty frame says "nothing measured this poll" and
+    the next poll retries the batch.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self):
+        from nanometa_live.core.utils import loader_utils
+        loader_utils.clear_all_loader_caches()
+        loader_utils._freshness_epoch = 0
+        yield
+        loader_utils.clear_all_loader_caches()
+
+    def _tree(self, tmp_path):
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _build_incremental_layout(kraken_dir, "barcode01", batch_reads=[59])
+        young = kraken_dir / "barcode01" / "batch_reports" / "batch_1.kraken2.report.txt"
+        _write_batch_report(young, 18, 1639, "Listeria monocytogenes")
+        now = time.time()
+        os.utime(young, (now, now))          # inside the stability window
+        standard = kraken_dir / "barcode01.kraken2.report.txt"
+        _write_batch_report(standard, 999, 562, "Escherichia coli")
+        return young
+
+    def test_unreadable_winner_yields_empty_frame(self, tmp_path):
+        self._tree(tmp_path)
+        df = load_kraken_latest_batch(str(tmp_path), "barcode01")
+        assert df.empty, (
+            "the standard report (999 reads, a different horizon) was served "
+            "as the latest batch while the real winner was unreadable")
+
+    def test_winner_is_served_once_stable(self, tmp_path, monkeypatch):
+        self._tree(tmp_path)
+        assert load_kraken_latest_batch(str(tmp_path), "barcode01").empty
+        from nanometa_live.core.utils import loader_utils
+        real = time.time
+        monkeypatch.setattr(loader_utils.time, "time", lambda: real() + 5.0)
+        df = load_kraken_latest_batch(str(tmp_path), "barcode01")
+        assert int(df[df["taxid"] == 1].iloc[0]["cumul_reads"]) == 18
+
+    def test_memoized_unreadable_winner_yields_empty_frame(self, tmp_path):
+        # Second call hits the directory-state memo; same answer.
+        self._tree(tmp_path)
+        load_kraken_latest_batch(str(tmp_path), "barcode01")
+        assert load_kraken_latest_batch(str(tmp_path), "barcode01").empty
+
+    def test_no_batch_files_still_falls_back_to_standard(self, tmp_path):
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _write_batch_report(kraken_dir / "barcode01.kraken2.report.txt", 999, 562, "E")
+        df = load_kraken_latest_batch(str(tmp_path), "barcode01")
+        assert int(df[df["taxid"] == 1].iloc[0]["cumul_reads"]) == 999

@@ -397,7 +397,12 @@ def _record_staleness(filepath: str, *, served_fallback: bool) -> None:
         parts = os.path.abspath(filepath).replace("\\", "/").split("/")
         if "kraken2" not in parts:
             return
-        scope = "/".join(parts[: parts.index("kraken2")]) or "/"
+        # The LAST ``kraken2`` component is the results tree's; an earlier
+        # one belongs to the path above it (``/data/kraken2/run/kraken2/..``)
+        # and keyed the scope on the wrong directory, so the banner's query
+        # for the real results dir never saw the flag (audit 2026-11-06, 37).
+        idx = len(parts) - 1 - parts[::-1].index("kraken2")
+        scope = "/".join(parts[:idx]) or "/"
         sample = _report_sample_key(filepath)
         if served_fallback:
             staleness.record_last_good_served(scope, sample)
@@ -1442,10 +1447,11 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
         latest_path = hit[1]
         if latest_path is not None:
             df = _parse_kraken2_report(latest_path)
-            if df is not None:
-                return df
-        # Memoized "no batch files" (or a vanished winner): fall through
-        # to the standard-report fallback below via an empty candidate set.
+            # An unreadable winner is unmeasured this poll (see below); a
+            # vanished one changes its directory's mtime and misses the memo.
+            return df if df is not None else pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
+        # Memoized "no batch files": the standard-report fallback below is
+        # reached via an empty candidate set.
         candidate_batches = []
     else:
         # 1. Collect candidate batch files and pick the highest-numbered one.
@@ -1475,8 +1481,17 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
         with _latest_batch_memo_lock:
             _latest_batch_memo[memo_key] = (dir_state, latest)
         df = _parse_kraken2_report(latest)
-        if df is not None:
-            return df
+        if df is None:
+            # The winner exists but cannot be read this poll (inside its
+            # stability window, or corrupt). Falling through to the
+            # standard report served a different horizon as "latest batch"
+            # -- in the incremental layout that file is the per-sample
+            # placeholder or the whole-sample total (audit 2026-11-06, 37).
+            # Unmeasured is the honest answer; the next poll retries.
+            logging.debug("Latest batch file for %s unreadable this poll: %s",
+                          sample_name, latest)
+            return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
+        return df
     elif hit is None or hit[0] != dir_state:
         # Remember that this dir state has no batch files, so the fallback
         # path below is also glob-free on the next poll.
