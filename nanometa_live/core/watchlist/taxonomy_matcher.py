@@ -136,16 +136,34 @@ class TaxonomyMatcher:
 
         return list(variants)
 
-    def build_entry_index(self, entries: List[Any]) -> EntryMatchIndex:
+    def build_entry_index(
+        self, entries: List[Any], generates_gtdb_variants: bool = False
+    ) -> EntryMatchIndex:
         """Precompute the alert-relevant match tiers for a list of entries.
 
         Entries are objects with ``name`` and ``names_alt`` attributes
         (``WatchlistEntry``), in the iteration order the caller's loop would
         have used -- position decides ties.
+
+        When ``generates_gtdb_variants`` is set (the loaded database is GTDB
+        or its nomenclature is undetectable), each entry's speculative GTDB
+        genus-suffix forms are indexed at the variant tier too, so a report
+        row carrying the real suffix (``Bacillus_A anthracis``) resolves to
+        an NCBI-named entry (``Bacillus anthracis``) with no taxid mapping in
+        hand. GTDB splits a polyphyletic genus and suffixes the parts
+        alphabetically and which suffix a genus got is not derivable, so all
+        26 are tried; the forms are built lazily and only when the profile
+        asks, exactly as the taxid-mapping ``match_strategies`` gate them,
+        because on an NCBI database they are provably absent and cost only
+        CPU. Off by default so the conservative path and its callers are
+        unchanged. Mirrors the flextaxd reality: pathogens live in the
+        grafted region under GTDB names, so without this an NCBI watchlist
+        on a mapping-less GTDB database silently matched nothing by name.
         """
         index = EntryMatchIndex()
         for pos, entry in enumerate(entries):
-            normalized = self.normalize_name(getattr(entry, "name", "") or "")
+            name = getattr(entry, "name", "") or ""
+            normalized = self.normalize_name(name)
             if not normalized:
                 continue
             index.exact.setdefault(normalized, (pos, entry))
@@ -153,14 +171,27 @@ class TaxonomyMatcher:
                 alt_norm = self.normalize_name(alt_name)
                 if alt_norm:
                     index.alt.setdefault(alt_norm, (pos, entry))
-            for variant in self.get_name_variants(entry.name):
+            for variant in self.get_name_variants(name):
                 index.variants.setdefault(variant, (pos, entry))
+            if generates_gtdb_variants:
+                for variant in self._gtdb_genus_variants(name):
+                    index.variants.setdefault(variant, (pos, entry))
             parts = normalized.split()
             if len(parts) >= 2:
                 index.genus_species.setdefault(
                     (parts[0], parts[1]), (pos, entry))
             index.substring_scan.append((normalized, entry))
         return index
+
+    @staticmethod
+    def _gtdb_genus_variants(name: str) -> List[str]:
+        """The speculative GTDB polyphyly forms for one name, or []."""
+        if not name:
+            return []
+        from nanometa_live.core.watchlist.validation.name_normalizer import (
+            get_name_normalizer,
+        )
+        return get_name_normalizer().normalize(name).gtdb_genus_variants
 
     def match_row_indexed(
         self, detected_name: str, index: EntryMatchIndex

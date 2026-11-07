@@ -28,6 +28,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **An NCBI watchlist name matches its GTDB counterpart without a taxid
+  mapping.** The live name matcher (`TaxonomyMatcher.build_entry_index` /
+  `match_row_indexed`, used by the dashboard's detection pass, the exported
+  report's threat screen and the custom-watchlist alert resolver) indexed
+  only an entry's cheap name forms, never the speculative GTDB genus-suffix
+  forms. So on a GTDB database the operator had not scanned into a taxid
+  mapping, an entry named `Bacillus anthracis` could not reach a report row
+  named `Bacillus_A anthracis`: the genus differs, so the genus+species and
+  substring tiers both miss, and the only bridge -- the taxid-mapping
+  collection -- was absent. `build_entry_index` now takes
+  `generates_gtdb_variants` and, when set, indexes each entry's GTDB
+  genus-suffix forms at the variant tier, exactly as the taxid-mapping
+  `match_strategies` gate them. The flag is derived from
+  `DatabaseProfile.generates_gtdb_variants` (GTDB or undetectable
+  nomenclature; unknown counts as generate, so a GTDB report is never
+  silently missed before indexing) at all three call sites, folded into the
+  manager's index cache key, and off by default so the NCBI path and every
+  existing caller are unchanged. Pinned in
+  `tests/test_gtdb_suffix_matching.py`.
 - **A custom watchlist entry with no `alert_threshold` screens at its threat
   level's default, not a flat 10.** Three paths defaulted an unstated
   threshold to 10 where `WatchlistEntry.from_dict` derived it from the threat
