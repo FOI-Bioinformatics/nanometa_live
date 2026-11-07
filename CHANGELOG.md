@@ -23,6 +23,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   taxids from a reserved high block, so the hierarchy is valid regardless of
   `PYTHONHASHSEED` or the random species draw. (`mock_data_generator.py` was
   checked and is unaffected: it builds its tree from real, unique NCBI taxids.)
+- `scripts/generate_6_barcode_dataset.py` (a standalone dev dataset generator)
+  got the same stable intermediate-rank taxids, and its 70 synthetic organisms
+  now form a strict taxonomic tree. Their ranks previously nested on
+  non-dividing boundaries (genus `i//10`, family `i//20`, order `i//30`) with
+  class/phylum keyed by `i%4`, so one synthetic genus landed under several
+  phyla; the "All Samples" aggregate could not represent the non-tree and
+  produced invalid indentation jumps for some random draws. Genus (`i//5`) now
+  nests in family (`i//10`) nests in order (`i//20`), with a single consistent
+  (phylum, class) pair per order.
 
 ## [0.19.0] - 2026-09-09
 
