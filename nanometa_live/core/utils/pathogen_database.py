@@ -29,6 +29,7 @@ from nanometa_live.core.config.pathogen_loader import (
     PathogenEntry,
     ThreatLevel,
     clear_cache,
+    default_alert_threshold,
     export_watchlist_template as _export_template,
     get_pathogen_database,
     validate_watchlist_yaml,
@@ -427,8 +428,15 @@ def _check_for_dangerous_pathogens_uncached(
             # Only alert for enabled entries (default to enabled if not specified)
             if not custom_entry.get("enabled", True):
                 continue
-            alert_threshold = custom_entry.get("alert_threshold", 10)
-            if reads >= alert_threshold:
+            # A custom entry that states no threshold screens at its threat
+            # level's default, the same table every other path uses; a flat
+            # 10 here made an unstated critical entry half as sensitive as
+            # the dashboard's own watchlist pass (audit 2026-11-06, finding 33).
+            alert_threshold = custom_entry.get("alert_threshold")
+            if alert_threshold is None:
+                alert_threshold = default_alert_threshold(
+                    custom_entry.get("threat_level", "moderate"))
+            if reads >= int(alert_threshold):
                 alerts.append({
                     "taxid": custom_entry.get("taxid") or taxid,
                     "detected_taxid": taxid,
