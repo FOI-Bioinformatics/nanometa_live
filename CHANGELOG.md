@@ -28,6 +28,93 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Fuzzy name matching no longer binds a watchlist entry to a congener.**
+  `FuzzyMatchStrategy` scored the whole name at 0.85, and its candidates all
+  share a genus, so `burkholderia mallei` against `burkholderia pseudomallei`
+  scored 0.864 and was accepted -- a melioidosis sample raised a glanders
+  (Tier 1) alert under the wrong organism's name, with no ambiguity
+  disclosure. The species epithets are now compared on their own at the same
+  threshold: a typo inside one epithet still matches, a GTDB polyphyly suffix
+  is not a difference, and a genus- or family-level entry is not gated.
+
+- **The exported report screens the watchlist through the taxid mapping and
+  the matcher.** `_match_entry_rows` compared `db_taxid or taxid` against the
+  frame's taxid column and fell back to an exact lowercase name compare, so on
+  a GTDB/flextaxd database *Bacillus anthracis* (NCBI 1392) against the row
+  `Bacillus_A anthracis` (4005020) matched nothing: every entry read
+  `detected=False` and the report printed the green "NO WATCHED ORGANISMS
+  DETECTED" for a run the dashboard alarmed on. Row resolution moved to
+  `core/export/watchlist_screen.py`, which adds the mapping collection's
+  `db_taxid` and routes the name fallback through `TaxonomyMatcher` at the 0.7
+  alert floor; the collection is loaded from `{db_hash}_mappings.json` when the
+  export runs in a worker with no singleton.
+
+- **A bare trinomial watchlist entry resolves to its subspecies node.**
+  `parse_binomial` set the subspecies only for the explicit `subsp.` spelling,
+  so *Francisella tularensis holarctica* generated only species-level variants
+  and landed on the parent species wherever the database writes `subsp.` --
+  collapsing Type A and Type B onto one match. A trinomial's third word is now
+  the subspecies epithet (rank words, serovar codes and strain numbers
+  excluded) and the `subsp.` form is generated ahead of the species fallback.
+
+- **A watchlist override lands on the entry it names.** `_apply_override`
+  indexed `_entries[taxid]` while a fork entry -- same NCBI taxid, different
+  `db_taxid` -- is stored under its own key, so an override for one of the
+  Bioshield *E. coli* variants moved another organism's threshold. It resolves
+  through `resolve_entry_key`, and each exported override record now carries
+  `db_taxid` and `name` so a session round trip can identify its entry.
+
+- **A config naming a missing watchlist without `enabled` is reported.**
+  `unresolved_watchlist_ids` defaulted the block's `enabled` to False where the
+  loader defaults it True, so such a config loaded zero entries while the
+  CRITICAL "Watchlist Files" row and the startup toast stayed silent.
+
+- **The validation launch parameters fall back to `default_config()`.**
+  `_validation_params` carried its own literals and two diverged:
+  `validation_method` fell back to `blast` against a default of `minimap2`, and
+  `e_val_cutoff` to `1e-10` against `0.01`. Invisible for a config read from
+  disk, decisive for one built in code -- confirmation testing then ran a
+  method the operator never chose at an e-value two orders of magnitude
+  stricter.
+
+- **The report's "Top Organisms" sorts on clade reads.** It sorted on the
+  per-rank `reads` column while displaying Kraken2's clade `%`, so
+  *F. tularensis* at 60% of a run ranked below *E. coli* at 2% and could fall
+  off the end of the table.
+
+- **A taxid mapping is keyed by entry identity.** Several watchlist entries
+  legitimately share one NCBI taxid while naming different database nodes (GTDB
+  polyphyly, NCBI subspecies), and `generate_mappings` wrote
+  `mappings[ncbi_taxid]`, so the three Bioshield *E. coli* variants left one
+  mapping and two database nodes resolved to no entry in
+  `_build_db_taxid_index`. The key now follows `_identity_key`, rides the record
+  as `TaxidMapping.entry_key` so a reload and a rescan reconstruct it, and the
+  slim browser store keys on it too.
+
+- **A custom watchlist entry is found however the report spells the name.** The
+  lookup was an exact lowercase compare, and the miss did not merely lose a
+  custom threshold: where the built-in database matched the row by substring,
+  the "not in the watchlist" branch suppressed the alert entirely. Resolution
+  goes through `TaxonomyMatcher` at the 0.7 floor, one pass over the rows.
+
+- **Three taxonomy state files are written atomically.** The taxid mapping
+  collection, the database index cache and the NCBI/GTDB taxonomy cache used
+  `open(path, "w")`, which truncates first; a truncated mappings file loads as
+  None and every entry then reads UNMAPPED -- a negative result produced by an
+  I/O accident, over a file that also holds the operator's manual
+  verifications.
+
+- **The report's decision banner respects each entry's `alert_threshold`.** It
+  alarmed on any detection, so one read of a critical entry rendered ACTION
+  REQUIRED where the dashboard renders MONITORING. A below-threshold detection
+  is still reported, as REVIEW RECOMMENDED.
+
+- **`NCBIClient.get_lineage` honours the per-host circuit breaker.** It issues
+  its own request (it needs XML) and consulted neither the breaker nor reported
+  to it, so with NCBI degraded every lineage call still paid the full timeout
+  after the breaker had opened, and its failures never counted towards opening
+  it. A response that arrives but does not parse is still not counted.
+
 - **`sample_name` is sent to the pipeline as a string.** A YAML
   `sample_name: 7` loaded as an int and reached nanometanf's `InputDetector`,
   which takes a String. The mapping coerces it; a digit-only name such as
