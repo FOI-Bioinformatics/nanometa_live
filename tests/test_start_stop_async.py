@@ -115,8 +115,10 @@ class TestCallbacksReturnInstantly:
         from tests.dash_test_utils import get_callback_fn
         fn = get_callback_fn(app, "collision-modal",
                              input_contains="start-stop-button")
+        ready = {"ready": True, "checks": [
+            {"name": "Kraken2 Database", "passed": True, "severity": "critical", "message": "ok"}]}
         out = fn(1, {"analysis_name": "run", "project_dir": str(tmp_path)},
-                 {"running": False})
+                 {"running": False}, ready)
         toast, _cfg, _stop_modal, _cmodal, _cbody, _pending, status = out
         backend.start_async.assert_called_once()
         assert status.get("running") is True and status.get("starting") is True

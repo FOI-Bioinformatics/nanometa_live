@@ -16,6 +16,7 @@ from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 from nanometa_live.app.utils.threat_display import threat_badge
+from nanometa_live.core.config.pathogen_loader import default_alert_threshold
 from nanometa_live.core.watchlist.watchlist_manager import ORGANISM_TYPES
 
 
@@ -532,6 +533,13 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                     # (main process) applies the session side effects.
                     dcc.Store(id="watchlist-import-request", data=None),
                     dcc.Store(id="watchlist-import-result", data=None),
+                    # Same split for API validation: request_validation
+                    # (main process) admits only a genuine click, so the
+                    # background worker -- whose running= clause opens the
+                    # progress modal the moment it is dispatched -- never
+                    # spawns for the component-add fire that a freshly
+                    # rendered table sends its ALL-pattern row buttons.
+                    dcc.Store(id="watchlist-validate-request", data=None),
                     # Help text for custom watchlists
                     html.Details([
                         html.Summary(
@@ -1217,7 +1225,10 @@ def _create_nested_pathogen_row(entry: Dict[str, Any], watchlist_id: str) -> htm
     row_key = entry.get("manager_key") or taxid
     name = entry.get("name", "Unknown")
     threat_level = entry.get("threat_level", "moderate")
-    threshold = entry.get("alert_threshold", 10)
+    threshold = entry.get("alert_threshold")
+    if threshold is None:
+        # Show the threshold the entry will screen at, not a flat placeholder.
+        threshold = default_alert_threshold(threat_level)
     enabled = entry.get("enabled", True)
 
 

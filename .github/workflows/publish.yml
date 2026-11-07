@@ -1,13 +1,15 @@
 name: Publish to PyPI
 
-# Builds the sdist and wheel for every published GitHub release and uploads
-# them through PyPI trusted publishing (no API token in the repository).
-# The owner must once register a pending publisher on PyPI for the project
-# name "nanometa-live" with: owner FOI-Bioinformatics, repository
-# nanometa_live, workflow publish.yml, environment pypi -- and create the
-# "pypi" environment under the repository settings. Until then the publish
-# job fails at the token exchange and the build job still proves the
-# distribution builds.
+# Builds the sdist and wheel for every published GitHub release, and uploads
+# them through PyPI trusted publishing (no API token in the repository) only
+# when the repository variable PUBLISH_TO_PYPI is "true". The upload is off
+# by default: the project is not on PyPI yet (decided 2026-09-10), and a
+# release must not end with a failed job for a path nobody has switched on.
+# To turn it on: register a pending publisher on PyPI for the project name
+# "nanometa-live" (owner FOI-Bioinformatics, repository nanometa_live,
+# workflow publish.yml, environment pypi), create the "pypi" environment
+# under the repository settings, then set the variable. The build job runs
+# on every release regardless and proves the distribution builds.
 
 on:
   release:
@@ -49,7 +51,7 @@ jobs:
   publish:
     name: Upload to PyPI
     needs: build
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' && vars.PUBLISH_TO_PYPI == 'true'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

@@ -82,7 +82,13 @@ def unresolved_watchlist_ids(config: Optional[Dict[str, Any]]) -> Dict[str, List
     startup toast ask.
     """
     wl = (config or {}).get("watchlist") or {}
-    if not isinstance(wl, dict) or not wl.get("enabled", False):
+    # ``enabled`` defaults TRUE, exactly as _load_config_locked reads it. It
+    # defaulted False here, so a config block that names a watchlist without
+    # saying ``enabled: true`` -- which the loader honours and loads from --
+    # was treated as "the operator chose no watchlist" and a missing file
+    # went unreported by both the CRITICAL check and the startup toast
+    # (audit 2026-11-06, finding 19).
+    if not isinstance(wl, dict) or not wl.get("enabled", True):
         return {}
     wanted = [str(w) for w in (wl.get("builtin") or []) if w]
     if not wanted:
@@ -183,7 +189,11 @@ class WatchlistEntry:
     name: str  # Primary scientific name
     common_name: Optional[str] = None
     threat_level: ThreatLevel = ThreatLevel.MODERATE
-    alert_threshold: int = 10
+    # None means "not stated"; __post_init__ derives it from threat_level via
+    # default_alert_threshold, the table from_dict already used. A flat 10 on
+    # the field made a directly constructed critical entry half as sensitive
+    # as the same entry loaded from YAML.
+    alert_threshold: Optional[int] = None
     bsl_level: Optional[BiosaftyLevel] = None
     category: Optional[str] = None
     notes: str = ""
@@ -216,6 +226,10 @@ class WatchlistEntry:
     api_commonname: Optional[str] = None
     api_rank: Optional[str] = None
     gtdb_taxonomy: Optional[str] = None  # Full GTDB taxonomy string
+
+    def __post_init__(self):
+        if self.alert_threshold is None:
+            self.alert_threshold = default_alert_threshold(self.threat_level)
 
     @classmethod
     def from_pathogen_entry(cls, pathogen: PathogenEntry) -> "WatchlistEntry":
@@ -535,7 +549,7 @@ class WatchlistManager:
         # (watchlist_signature, EntryMatchIndex) built lazily by
         # _entry_match_index. Content-keyed, so every mutation invalidates
         # by construction -- there is no bump hook to forget.
-        self._match_index_cache: Optional[Tuple[str, Any]] = None
+        self._match_index_cache: Optional[Tuple[Tuple[str, bool], Any]] = None
 
     def load_config(self, config: Dict[str, Any]) -> None:
         """
@@ -890,12 +904,25 @@ class WatchlistManager:
                 self._name_index[alt_name.lower()] = pseudo_taxid
 
     def _apply_override(self, override: Dict[str, Any]) -> None:
-        """Apply an override to an existing entry."""
+        """Apply an override to an existing entry.
+
+        Resolved through :meth:`resolve_entry_key`, not ``_entries[taxid]``:
+        a fork entry (same NCBI taxid as another, different ``db_taxid``) is
+        stored under its own key, so the raw lookup silently applied the
+        override to whichever of the pair holds the NCBI taxid. With the
+        Bioshield *E. coli* / *E. coli_F* pair, raising one entry's
+        threshold raised the other's (audit 2026-11-06, finding 18).
+        """
         taxid = override.get("taxid")
-        if not taxid or taxid not in self._entries:
+        key = self.resolve_entry_key(
+            taxid=taxid,
+            db_taxid=override.get("db_taxid"),
+            name=override.get("name"),
+        )
+        if key is None or key not in self._entries:
             return
 
-        entry = self._entries[taxid]
+        entry = self._entries[key]
 
         # Store original values if not already overridden
         if not entry.user_override:
@@ -1019,6 +1046,29 @@ class WatchlistManager:
             return bool(collection and collection.profile.taxids_are_ncbi)
         except (ImportError, AttributeError):
             return False
+
+    @staticmethod
+    def _database_generates_gtdb_variants() -> bool:
+        """Whether to index the entries' speculative GTDB genus-suffix forms.
+
+        True for a GTDB database and for one whose nomenclature cannot be
+        established -- the same ``DatabaseProfile.generates_gtdb_variants``
+        rule the taxid-mapping strategies use. On a mapping-less GTDB
+        database this is the only bridge from an NCBI watchlist name to the
+        report's grafted GTDB name; False (NCBI, or no profile yet) keeps the
+        index cheap, since the suffixes are provably absent there.
+        """
+        try:
+            from nanometa_live.core.taxonomy.taxid_mapping import (
+                get_mapping_collection,
+            )
+            collection = get_mapping_collection()
+            return bool(collection and collection.profile.generates_gtdb_variants)
+        except (ImportError, AttributeError):
+            # No profile yet: match the live detection default of generating
+            # variants when nomenclature is unknown, so a GTDB report is not
+            # silently missed before the database is indexed.
+            return True
 
     @staticmethod
     def _other_entries_on_node(
@@ -1173,12 +1223,13 @@ class WatchlistManager:
         former inner loop recomputed name variants for every
         (row x entry) pair.
         """
-        signature = self.watchlist_signature(active_entries)
+        gtdb = self._database_generates_gtdb_variants()
+        signature = (self.watchlist_signature(active_entries), gtdb)
         cached = self._match_index_cache
         if cached is not None and cached[0] == signature:
             return cached[1]
         index = _get_taxonomy_matcher().build_entry_index(
-            list(active_entries.values()))
+            list(active_entries.values()), generates_gtdb_variants=gtdb)
         self._match_index_cache = (signature, index)
         return index
 
@@ -1830,6 +1881,12 @@ class WatchlistManager:
             elif entry.user_override:
                 overrides.append({
                     "taxid": entry.taxid,
+                    # db_taxid and name identify WHICH entry this override is
+                    # for. Entry identity is the (NCBI taxid, db_taxid) pair,
+                    # so a taxid alone cannot name one of a fork pair and
+                    # _apply_override landed on the wrong one on reload.
+                    "db_taxid": entry.db_taxid,
+                    "name": entry.name,
                     "alert_threshold": entry.alert_threshold,
                     "threat_level": entry.threat_level.value,
                     "enabled": entry.enabled,

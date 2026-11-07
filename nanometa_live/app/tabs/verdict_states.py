@@ -90,6 +90,28 @@ def results_unavailable_descriptor() -> VerdictDescriptor:
     )
 
 
+def results_unreadable_descriptor(detail: Optional[str] = None) -> VerdictDescriptor:
+    """RESULTS UNREADABLE: the results directory is there but could not be read.
+
+    The loader raised (a report a parser did not expect, a permission error
+    on a sidecar) and the banner used to fall back to STANDBY, which reads
+    as "nothing to do" while the pipeline is running and writing (field
+    audit 2026-10-28, M1). Amber with a red border, like the other
+    failure states: the measurement is missing, not negative.
+    """
+    subtitle = ("The results directory could not be read this poll -- the "
+                "screening verdict is suspended until it can be")
+    if detail:
+        subtitle += f" ({detail})"
+    return VerdictDescriptor(
+        state="RESULTS_UNREADABLE",
+        icon="file-earmark-x-fill", icon_color="#dc3545",
+        title="RESULTS UNREADABLE",
+        subtitle=subtitle,
+        sub_color="#664d03", bg_color="#fff3cd", border_color="#dc3545",
+    )
+
+
 def with_failure_clauses(
     descriptor: VerdictDescriptor,
     *,
@@ -101,6 +123,7 @@ def with_failure_clauses(
     failed_tasks: int = 0,
     input_layout_mismatch: Optional[str] = None,
     batch_progress_clause: Optional[str] = None,
+    disk_low: Optional[str] = None,
 ) -> VerdictDescriptor:
     """Append run-health clauses to a data-state descriptor's subtitle.
 
@@ -148,6 +171,11 @@ def with_failure_clauses(
         # sample's chunks incrementally, and a detection must still render
         # ACTION REQUIRED while some barcodes have more chunks to come.
         clauses.append(batch_progress_clause)
+    if disk_low:
+        # ENOSPC inside a tool exits 1, which error isolation absorbs, so a
+        # run on a full disk ends COMPLETE over truncated reports (field
+        # audit 2026-10-28, M3). The backend polls free space each tick.
+        clauses.append(disk_low)
     if not clauses:
         return descriptor
     return replace(

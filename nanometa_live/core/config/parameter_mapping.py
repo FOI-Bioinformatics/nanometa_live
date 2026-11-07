@@ -32,6 +32,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 
+from nanometa_live.core.config.config_loader import default_config
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 from nanometa_live.core.utils.genome_manager import get_genome_manager
 
@@ -756,6 +757,12 @@ def _resolve_kraken2_memory_mapping(config: Dict[str, Any]) -> bool:
     return True
 
 
+# Headroom above hash.k2d in the Kraken2 memory request ("DB size + 4 GB",
+# nanometanf's own rule of thumb). The readiness checker uses the same
+# figure for the no-mmap case, where this is the private allocation.
+KRAKEN2_REQUEST_HEADROOM_GB = 4
+
+
 def _resolve_kraken2_memory_gb(config: Dict[str, Any]) -> Optional[int]:
     """Size the Kraken2 memory request from the actual database.
 
@@ -783,7 +790,7 @@ def _resolve_kraken2_memory_gb(config: Dict[str, Any]) -> Optional[int]:
     except OSError:
         return None
     gib = hash_bytes / (1024 ** 3)
-    return max(12, math.ceil(gib) + 4)
+    return max(12, math.ceil(gib) + KRAKEN2_REQUEST_HEADROOM_GB)
 
 
 def _host_memory_bytes() -> Optional[int]:
@@ -803,6 +810,69 @@ def _hash_bytes(db_path: str) -> Optional[int]:
 
 KRAKEN2_TASK_MEMORY_FLOOR_GB = 4
 _PAGE_CACHE_SHARE = 0.6
+# What the pipeline may request for one task on this machine: total RAM
+# less what the OS, the Nextflow JVM and the dashboard need. Below the
+# floor the headroom is not taken -- a 6 GB machine gets 4 GB, not 3.
+HOST_MEMORY_HEADROOM_GB = 2
+MAX_MEMORY_FLOOR_GB = 4
+
+
+def _resolve_max_memory_gb(config: Dict[str, Any]) -> Optional[int]:
+    """The per-task memory ceiling for this host, or None to leave it to
+    the pipeline.
+
+    nanometanf caps every request at ``resourceLimits.memory``, which its
+    base config raises to the Kraken2 request so a PlusPFP operator's
+    explicit size is honoured -- and which therefore also rises above the
+    laptop's RAM when the GUI sizes that request from a database larger
+    than the machine. Nextflow's local executor refuses a task whose
+    request exceeds physical memory and aborts the run with "Process
+    requirement exceeds available memory", a message the dashboard's log
+    scanner did not recognise (field audit 2026-10-28, H1). Sending the
+    host's own ceiling makes the pipeline clamp to it instead: with memory
+    mapping the classifier then runs from the page cache, and the no-mmap
+    retry -- which doubles its request -- is clamped rather than aborted.
+    An explicit ``max_memory`` in the config wins (an integer is GB, a
+    Nextflow memory string such as ``'24.GB'`` travels verbatim).
+    """
+    explicit = config.get("max_memory")
+    if explicit not in (None, ""):
+        try:
+            return int(explicit)
+        except (TypeError, ValueError):
+            if isinstance(explicit, str) and explicit.strip():
+                return explicit.strip()  # type: ignore[return-value]
+            logging.warning("Ignoring non-numeric max_memory: %r", explicit)
+    host = _host_memory_bytes()
+    if not host:
+        return None
+    total_gb = host / (1024 ** 3)
+    return max(MAX_MEMORY_FLOOR_GB, math.floor(total_gb) - HOST_MEMORY_HEADROOM_GB)
+
+
+def resource_ceiling_params(config: Dict[str, Any]) -> Dict[str, Any]:
+    """``max_cpus`` / ``max_memory`` exactly as the main launch sends them.
+
+    The Configuration tab's CPU Cores field is nanometanf's per-task
+    ceiling, omitted when empty so the pipeline default or platform profile
+    applies (audit round 5, A9). The memory ceiling is the host's own, so a
+    request sized above the laptop is clamped by the pipeline instead of
+    aborting the run (see ``_resolve_max_memory_gb``). The on-demand
+    validation launch sends the same pair: without it BLAST and minimap2
+    asked ``8.GB * attempt`` under the pipeline's 16 GB default and an 8 GB
+    laptop aborted where the main run had been clamped (audit 2026-11-06,
+    finding 32).
+    """
+    params: Dict[str, Any] = {}
+    max_cpus = config.get("max_cpus")
+    if max_cpus not in (None, ""):
+        params["max_cpus"] = int(max_cpus)
+    max_memory = _resolve_max_memory_gb(config)
+    if max_memory is not None:
+        params["max_memory"] = (
+            max_memory if isinstance(max_memory, str) else f"{int(max_memory)}.GB"
+        )
+    return params
 
 
 def _resolve_kraken2_task_memory_gb(config: Dict[str, Any]) -> Optional[int]:
@@ -855,26 +925,40 @@ def _validation_params(config: Dict[str, Any], run_validation_enabled: bool,
     producing a false negative. The pipeline's per-batch gate stays at its
     safe default of 1, results-identical to extracting every taxid.
     """
+    # Every fallback below must equal default_config(): load_config merges the
+    # defaults on read, so a divergent literal here only surfaces for a config
+    # built in code or one predating the key -- and then it silently changes
+    # the run. validation_method fell back to "blast" against a default of
+    # "minimap2" (a 5-10x slower method the operator did not choose) and
+    # e_val_cutoff to 1e-10 against 0.01, two orders of magnitude stricter,
+    # which drops true hits from confirmation testing (audit 2026-11-06,
+    # finding 20).
+    defaults = default_config()
     return {
         "run_validation": run_validation_enabled,
-        "validation_method": config.get("validation_method", "blast"),
-        "blast_evalue": _coerce_blast_evalue(config.get("e_val_cutoff", 1e-10)),
+        "validation_method": config.get(
+            "validation_method", defaults["validation_method"]),
+        "blast_evalue": _coerce_blast_evalue(
+            config.get("e_val_cutoff", defaults["e_val_cutoff"])),
         "blast_perc_identity": int(round(float(
             config.get("validation_identity_threshold", 90)
         ))),
-        "validation_hit_rate_threshold": config.get("validation_hit_rate_threshold", 0.5),
-        "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
+        "validation_hit_rate_threshold": config.get(
+            "validation_hit_rate_threshold",
+            defaults["validation_hit_rate_threshold"]),
+        "validation_identity_threshold": config.get(
+            "validation_identity_threshold",
+            defaults["validation_identity_threshold"]),
         "minimap2_preset": _coerce_minimap2_preset(config.get("minimap2_preset")),
-        # Fallback must match create_default_config (30). A divergent default
-        # (10) silently filtered more permissively for any config missing
-        # the key -- programmatic configs and files predating the field.
-        "minimap2_min_mapq": config.get("minimap2_min_mapq", 30),
+        "minimap2_min_mapq": config.get(
+            "minimap2_min_mapq", defaults["minimap2_min_mapq"]),
         # Consensus sequence generation (amplicon-focused). Off unless the
         # operator enables it; only meaningful when validation runs.
         "generate_consensus": (
             config.get("generate_consensus", False) and run_validation_enabled
         ),
-        "consensus_min_depth": config.get("consensus_min_depth", 10),
+        "consensus_min_depth": config.get(
+            "consensus_min_depth", defaults.get("consensus_min_depth", 10)),
         # Legacy parameter (deprecated; nanometanf maps to run_validation)
         "blast_validation": blast_validation_enabled,
     }
@@ -895,8 +979,12 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         # Save reads assignment and classified FASTQs (required for validation):
         # save_reads_assignment gives per-read Kraken2 output (which reads map to
         # which taxid); save_output_fastqs gives the classified reads to BLAST.
-        "save_reads_assignment": run_validation_enabled,
-        "save_output_fastqs": run_validation_enabled,
+        # A config asking for them explicitly gets them too: the on-demand
+        # check reads exactly these files (audit 2026-11-06, finding 4).
+        "save_reads_assignment": bool(
+            run_validation_enabled or config.get("save_reads_assignment", False)),
+        "save_output_fastqs": bool(
+            run_validation_enabled or config.get("save_output_fastqs", False)),
 
         # Validation parameters - nanometanf VALIDATION subworkflow
         **_validation_params(config, run_validation_enabled, blast_validation_enabled),
@@ -1249,7 +1337,13 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     # Get processing mode and sample handling configuration
     processing_mode = config.get("processing_mode", "batch")
     sample_handling = config.get("sample_handling", "by_barcode")
-    sample_name = config.get("sample_name", "sample")
+    # Sent as a string whatever the config carried: a YAML `sample_name: 7`
+    # loads as an int, and nanometanf's InputDetector takes a String. (A
+    # digit-only name is fine on the pipeline side since nanometanf
+    # 1.12.0dev typed the parameter string-or-integer; before that nf-schema
+    # cast "007" to 7 for its type check and refused it.)
+    raw_sample_name = config.get("sample_name", "sample")
+    sample_name = "sample" if raw_sample_name is None else str(raw_sample_name)
 
     logging.info(f"Processing mode: {processing_mode}, Sample handling: {sample_handling}")
     logging.info(f"Input directory: {nanopore_dir}")
@@ -1358,12 +1452,8 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     if task_memory_gb is not None:
         params["kraken2_task_memory_gb"] = task_memory_gb
 
-    # The Configuration tab's CPU Cores field: nanometanf's per-task ceiling.
-    # Omitted when empty so the pipeline default (16) or platform profile
-    # applies (audit round 5, A9).
-    max_cpus = config.get("max_cpus")
-    if max_cpus not in (None, ""):
-        params["max_cpus"] = int(max_cpus)
+    # The host's CPU and memory ceilings (shared with the on-demand launch).
+    params.update(resource_ceiling_params(config))
 
     # Add validation species if configured (from Watchlist or legacy config)
     if has_species and validation_taxids:

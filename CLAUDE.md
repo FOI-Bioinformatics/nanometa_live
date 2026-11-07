@@ -117,7 +117,19 @@ and dependencies stay dynamic (`nanometa_live.__version__` and
 
 `nanometa_live_env.yml` includes Nextflow (`>=26.04.0`) — without it the
 environment yields a working dashboard and a pipeline that fails the moment
-Start Analysis is pressed. `nanometa-prepare doctor` is the config-free
+Start Analysis is pressed. It must carry EVERY runtime requirement at the
+same floor as `requirements.txt` (`tests/test_env_yml_covers_requirements.py`
+is the fence): it is the documented offline install route, and six missing
+packages once left a field machine with an app that failed at import and a
+`pip install` that reached for PyPI (field audit 2026-10-28, H6). A GUI
+Start gives each run its own `NXF_HOME` under the results folder; the
+get.nextflow.io launcher keeps its runtime jar under
+`$NXF_HOME/framework/<ver>/` and downloads it when absent, which
+`NXF_OFFLINE` does not stop, so `_build_nextflow_env` seeds the fresh home
+by symlinking `framework/` and `capsule/` from `~/.nextflow`
+(`_seed_nextflow_home`), and the doctor's "Nextflow runtime cache" row says
+whether that cache exists. The bioconda launcher ships its jar and needs
+neither. `nanometa-prepare doctor` is the config-free
 post-install check (Python, Nextflow + floor, conda, container runtimes, data
 dirs); `nanometa-prepare check --config` is the run-specific one. Every CLI
 subcommand except `verify` calls `NanometaPaths.ensure_dirs()` before
@@ -410,7 +422,7 @@ results/
 Notes:
 - `fastp/` and `seqkit/` are mutually exclusive; QC loaders try fastp first, fall back to seqkit.
 - `seqkit/<sample>.tsv` is the current flat layout (plus the incremental `seqkit/<sample>/batch_stats/*.tsv`). The older nested `seqkit/<sample>/stats/*.tsv` layout was retired in the 2026-06-02 sunset pass.
-- Nextflow trace lives at `pipeline_info/execution_trace_*.txt` (per `nextflow.config:407` in nanometanf). The GUI's NextflowManager redirects its own copy to `~/.nanometa/logs/trace.txt` for status polling, but the canonical pipeline emit is under `pipeline_info/`.
+- Nextflow trace lives at `pipeline_info/execution_trace_*.txt` (nanometanf's `trace {}` block). A `-with-trace` flag REPLACES that target rather than copying it, so the GUI's NextflowManager names its own path there: `<outdir>/pipeline_info/execution_trace_<launch ts>.txt` (`_run_trace_path`, kept in `trace_path` for the status poller). `-with-report` / `-with-timeline` are not sent; the pipeline's config writes both under `pipeline_info/`. Before 2026-11-07 all three went to `<data_dir>/logs/`, so the Reports tab's three Nextflow entries never existed on a GUI run and the export never carried them (audit finding 23). The data-dir `logs/trace.txt` is now only the fallback when the params carry no outdir.
 
 ## Configuration
 
@@ -475,6 +487,27 @@ override wins" resolver into dead code (the `min_perc_identity` pattern).
 The readiness checklist warns when `kraken_db` sits on a removable/network
 volume (mmap random access over USB is pathological; the content-derived
 `db_hash` makes a local copy free of re-preparation).
+
+**The request is compared to the machine, and the machine's ceiling travels
+with it** (field audit 2026-10-28, H1). nanometanf raises its
+`resourceLimits.memory` to the Kraken2 request so an explicit PlusPFP size is
+honoured, which also raised it above a laptop's RAM whenever the GUI sized
+the request from a database larger than the machine; Nextflow's local
+executor refuses a request above physical memory and aborts the run with
+"Process requirement exceeds available memory", which the header's log
+scanner did not recognise. Three guards: `_resolve_max_memory_gb` sends
+`--max_memory` as total RAM minus `HOST_MEMORY_HEADROOM_GB` (explicit config
+value wins), nanometanf clamps both its base ceiling and the classifier's
+no-mmap retry (`full * attempt`) to that param, and the readiness row
+"Database Memory" (`_check_kraken_db_memory`) is CRITICAL when `hash.k2d`
+cannot fit in RAM at all (or memory mapping is off and the private load
+cannot), WARNING above `KRAKEN_DB_MEMORY_WARN_SHARE` of RAM (fits only
+through the page cache; the retry will not). `KRAKEN2_REQUEST_HEADROOM_GB`
+(4) is the one definition of the "+4 GB" both sites use. nanometanf's `field`
+profile is deliberately NOT selected by the GUI: its `params` block forces
+`realtime_mode = true` and `skip_nanoplot`, and profile params outrank
+nothing the GUI omits, so a batch run would have been hijacked; the GUI sends
+the laptop budget itself instead.
 
 ### Parameter mapping (non-obvious renames)
 
@@ -862,6 +895,18 @@ negative is a missed detection. Measured saving on an NCBI database
 (13 of the 14 shipped): 156k fewer string builds per 2000 names.
 Regression-covered in `tests/test_database_profile.py`.
 
+The **live name matcher** gates the same way.
+`TaxonomyMatcher.build_entry_index(entries, generates_gtdb_variants=...)`
+indexes each entry's GTDB genus-suffix forms at the variant tier when the
+flag is set, so an NCBI watchlist name (`Bacillus anthracis`) matches a
+grafted GTDB report row (`Bacillus_A anthracis`) with no taxid mapping in
+hand -- the genus differs, so no cheaper tier bridges them. The flag comes
+from `DatabaseProfile.generates_gtdb_variants` at every call site
+(`WatchlistManager._entry_match_index`, folded into its index cache key;
+`EntryRowResolver` for the export screen; `_custom_name_resolver` for custom
+alerts) and is off by default, so the NCBI path stays cheap. Regression in
+`tests/test_gtdb_suffix_matching.py`.
+
 **flextaxd / hybrid databases are the normal case.** The in-house field
 databases (Bioshield and similar) are built with flextaxd: an NCBI
 backbone with finer-resolution clades grafted in, then minimized to fit
@@ -1023,8 +1068,25 @@ not cover is left untouched. `OnDemandValidator._save_results` derives its
 threshold copy, so the two paths cannot drift. Both changed in the 2026-06-02
 validation audit.
 
-Requirements: `pipeline_source` configured, `save_reads_assignment: true`,
-original FASTQ accessible. `pipeline_source` is now mandatory: missing config
+Requirements: `pipeline_source` configured, per-read classifier output on
+disk, original FASTQ accessible. **What "per-read output" means depends on
+the classifier branch, and today a default GUI run has none the pipeline
+entry can read** (audit 2026-11-06, finding 4). The GUI forces
+`kraken2_enable_incremental` and real time always takes the incremental
+branch; as of nanometanf `8c09b38` that branch publishes only
+`kraken2/<sample>/batches/batch_N.kraken2.output.txt` (per batch, always)
+and `kraken2/<sample>.cumulative.kraken2.output.txt` (at session end), never
+`<sample>.kraken2.classified.fastq.gz` or a flat `<sample>.kraken2.output.txt`
+-- those two are published by `KRAKEN2_KRAKEN2` (standard mode) only. The
+GUI side reads what exists: `core/utils/read_extractor.py` resolves the
+cumulative output, else every `batches/` file, else the flat legacy names;
+and `parameter_mapping` sends `save_reads_assignment` / `save_output_fastqs`
+when the config sets them, not only when watchlist validation is on.
+nanometanf WP2a (`claude/fix-realtime-resume-validation`) adds the
+classified-FASTQ and flat per-read publish to the incremental branch so
+`--validation_only` finds its inputs after a default run; until it merges,
+the on-demand launch after an incremental run reports "did not return a
+result". `pipeline_source` is now mandatory: missing config
 or a `None` return from `validate_via_nanometanf` produces a failed
 `ValidationResult` with a descriptive `error_message` instead of silently
 running a parallel subprocess path. The legacy local-subprocess fallback was
@@ -1032,7 +1094,7 @@ removed in the 2026-05-07 audit pass (commit `4c7c284`).
 
 ### Durable invariants in the validation pipeline
 
-- `subworkflows/local/validation/main.nf` coerces `taxids_to_validate` to string before `.split()`. Nextflow's CLI parser silently promotes all-digit single values to `Integer` regardless of schema; coercion is required for single-taxid GUI calls.
+- `subworkflows/local/validation/main.nf` coerces `taxids_to_validate` to string before `.split()`. Nextflow's CLI parser silently promotes all-digit single values to `Integer` regardless of schema; coercion is required for single-taxid GUI calls. nf-schema (2.7.2+) applies the same cast to every command-line AND params-file string before it checks the type, so nanometanf's schema types the parameter `["string", "integer"]` (since 1.12.0dev); typed as string alone it refused the single-taxid `-params-file` the GUI writes for a run with one watched organism. `sample_name` is typed the same way since nanometanf 1.12.0dev (both of its call sites coerce to String, so `007` stays `007`), and `create_nextflow_params` sends it as a string whatever the config carried. nanometanf's `--validation_only` entry runs `PIPELINE_INITIALISATION` since 1.12.0dev as well, so the on-demand launch IS schema-validated now: validation-only is the fifth input mode (`--validation_only` with `--kraken2_output_dir` and `--reads_dir`) and needs no `--kraken2_db`.
 - `modules/local/minimap2_validation/main.nf` double-escapes `\\n` in the awk JSON writer because bare `\n` in a Groovy triple-quoted string expands at parse time.
 - `modules/local/blastn_validation/main.nf` deduplicates BLAST hits by `qseqid` so `hit_rate` stays bounded to `[0, 1]`. Counting raw HSPs produces hit rates above 1.
 
@@ -1146,7 +1208,15 @@ Three concerns:
      restored path — text replace, NUL-padded in-place for binaries, symlink
      retarget (`core/workflow/conda_cache_utils.relocate_conda_cache`).
      Conda envs embed the build prefix in shebangs/binaries, so without this
-     every env fails exit-127 at first use. Absolute symlinks are made
+     every env fails exit-127 at first use. **A `.pyc` is marshal data, not a
+     C string table**: its strings are length-prefixed, so the NUL-padded
+     rewrite shifted every byte after `co_filename` and broke the module at
+     import while relocation reported zero failures (field audit 2026-10-28,
+     C1). Relocation deletes any `.pyc` carrying the old prefix instead
+     (`pyc_removed`); Python regenerates it. The bundle-deploy workflow's
+     `relocate-python-env` job imports a byte-compiled module from a
+     relocated real environment, which is the check the unit fixtures
+     (ELF-shaped blobs) could not make. Absolute symlinks are made
      relative at export (tarfile's `data` filter aborts on absolute link
      targets); import copies symlinks as symlinks. **Every patched Mach-O is
      ad-hoc re-signed** (`_resign_macho`, `/usr/bin/codesign -s -`): the byte
@@ -1206,22 +1276,65 @@ Three concerns:
 
 `nanometanf` floors at `nextflowVersion = '>=26.04.0'` (manifest in
 `nanometanf/nextflow.config`). The matching `nf-core` conda env ships
-Nextflow 26.04.0 / nf-core/tools 4.0.2 / nf-test 0.9.5. The pipeline
+Nextflow 26.04.0 / nf-core/tools 4.0.2 / nf-test 0.9.5. All three are
+on conda-forge plus bioconda, so an environment without the shipped
+env can reproduce the toolchain with
+`micromamba create -c conda-forge -c bioconda nextflow=26.04.0 nf-test=0.9.5 nf-core`
+(verified 2026-10-27; `nextflow`, `nf-test` and `nf-core` all resolve
+from those two channels). The pipeline
 parses cleanly under the strict v2 grammar (default in 26+) — no
 `NXF_SYNTAX_PARSER` opt-in needed. Verification is in
 `docs/audit/realtime-2026-05-09.md` sections 13 and 14.
 
-One known upstream wrinkle: **`nf-core/tools 4.0.2 pipelines lint`
-crashes** with `LiveError` from `rocrate.parse_manifest_contributors`.
-Pin `nf-core==3.5.2` for local lint runs until the rich progress-bar
-nesting is fixed upstream. This is unrelated to the runtime path —
-pipelines run normally under 4.0.2.
+One upstream wrinkle, **settled on 2026-10-27**:
+`nf-core/tools 4.0.2 pipelines lint` crashed with `LiveError` from
+`rocrate.parse_manifest_contributors`, which is why nanometanf's lint
+job was pinned to `nf-core==3.5.2`. It now installs `nf-core>=4.2.1`
+(`.github/workflows/linting.yml`), and 4.2.1 does clear the crash:
+lint ran to completion on a GitHub runner and passes. Confirming it
+needed a runner, because `nf-core pipelines lint` fetches
+`https://nf-co.re/pipelines.json` and resolves the nf-schema plugin
+through `https://registry.nextflow.io`, and where the environment's
+network policy denies those hosts the traceback is a proxy 403 well
+before any lint rule runs.
+
+Two things that move came out of the same run. 4.2.1 shells out to
+`nextflow config -o json`, which Nextflow 26.04.0 does not accept
+(`Cannot invoke method endsWith() on null object`), so the lint job's
+own `NXF_VER` pin had to go — it runs the current release, and the
+26.04.0 floor is asserted by nanometanf's manifest rather than by that
+job. And 4.2.1 brought five findings that 3.5.2 did not apply, among
+them a real one: its container-config generator writes a conda-lock
+file to `conda =` where 3.5.2 wrote `container =`. The regenerated
+`conf/containers_conda_lock_files_*.config` carry the corrected
+directive; nothing in that repository includes either file, so no run
+was affected.
+
+None of this touches the runtime path — pipelines run normally under
+4.0.2 and 4.2.1. `nf_core_version` in nanometanf's `.nf-core.yml` records the template
+version the pipeline was last synced to, not which tool to run. It reads
+4.2.1 since the 2026-10-29 hand sync (the repository has no TEMPLATE
+branch for `nf-core pipelines sync`), which brought the template's pinned
+`utils_*` subworkflows, the help flags into the schema subworkflow and the
+end of `hook_url`; the same day the pipeline moved one step past the
+template to **nf-schema 3.0.0** with the `utils_*` subworkflows at
+nf-core/modules master. nf-schema 2.7+ validates `false` values it used to
+skip, so a non-boolean parameter must never be sent as `false` (cancel a
+profile's `input` with `null`); the GUI's generated parameters were
+checked against the schema. The plugin must be in the Nextflow plugin
+cache for a Start or a bundle export to work offline:
+`nanometa-prepare doctor` has a row for it, and `_seed_nextflow_home`
+links `plugins/` into each per-run `NXF_HOME`.
 
 The 25.10.x watchPath JVM cleanup hang (the historical reason for the
 `NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0.
 
 **nanometanf floor.** `core/workflow/pipeline_compat.py` owns
-`NANOMETANF_MIN_VERSION` (1.10.0 as of 0.18.0). `NextflowManager.setup`
+`NANOMETANF_MIN_VERSION` (1.12.0 since 2026-11-07: the first nanometanf that
+accepts a digit-only `sample_name`, a single `taxids_to_validate` and a
+schema-validated `--validation_only`, all of which the GUI sends; a
+`1.12.0dev` checkout passes as the development pre-release of the floor).
+`NextflowManager.setup`
 refuses a checkout below it by name, the readiness checklist carries a
 "Pipeline Version" row, and the README compatibility matrix names the same
 floor (fence: `tests/test_compatibility_matrix.py`). A `remote:` source runs
@@ -1386,6 +1499,46 @@ from files on disk. Marked rather than hidden — hiding loses the fact that
 the barcode was attempted. The exported report carries the same
 attempted-but-no-output marking.
 
+**Start is gated on the server, and the lock knows the pipeline (field
+audit 2026-10-28, H5 and H3).** `start_or_prompt_stop` takes
+`State("readiness-state")` and refuses a launch through
+`app/utils/start_gate.readiness_blocks_start` when any CRITICAL row failed
+or the state was never computed; the header button's disabled attribute is
+a courtesy that the Preparation tab's proxy button and a stale Store walk
+past, and before this nothing else checked. `start_without_readiness` /
+`NANOMETA_ALLOW_NOT_READY=1` are the operator's override. The run lock
+(`.nanometa.lock`) records `nextflow_pid` once the monitor loop sees it
+(`_record_nextflow_pid`); `_acquire_lock` refuses while that process lives
+even if the GUI that took the lock is dead (it used to call the lock stale
+and start a second pipeline into the same outdir and work dir), the
+startup toast `warn_about_orphan_run_on_startup` names such a run, and the
+lock is opened `a+` so a second instance reads the holder's record instead
+of truncating it. Attaching to an orphan is not offered: the manager cannot
+adopt a subprocess handle it did not create. **Dash callback_map gotcha:**
+two callbacks with the same Output and the same Input set share a
+`callback_map` key and the later registration silently replaces the
+earlier one. The orphan toast therefore takes `results-dir-path` as its
+Input, not `app-config` like the missing-paths toast; tests select startup
+callbacks by function name for the same reason.
+
+**Four truthfulness gaps closed by the 2026-10-28 field audit (M1, M2,
+M3, M8; do not regress).** `select_verdict` takes `load_failed` /
+`load_error`: a loader exception is RESULTS UNREADABLE
+(`results_unreadable_descriptor`), never STANDBY, and sits below
+RESULTS UNAVAILABLE and PIPELINE ERROR in the no-data tail.
+`NextflowManager._parse_trace_file(force=True)` is read once after the
+process exits (monitor loop and launch thread), bypassing the 1 s
+stability window that otherwise lost the last window's tasks; and
+`_apply_terminal_workflow_status` treats exit 0 with zero tasks as
+"completed" with `status["completion_note"]`, not as a crash. Free space on
+the results volume is polled by `_update_file_counts` through
+`core/utils/disk_space.py` (`LOW_DISK_FLOOR_GB`, shared with the readiness
+check) into `status["disk_free_gb"]` / `status["disk_low"]`, which the
+header and `with_failure_clauses(disk_low=...)` carry. `update_interval`
+takes the tick count and serves `WARMUP_TICKS` (2) at the active cadence
+before the idle back-off, so existing results render within seconds of
+boot.
+
 **Verdict-banner decision logic is a pure function.** The safety-critical
 clinical verdict (ACTION REQUIRED / MONITORING / ALL CLEAR / INSUFFICIENT READS
 / NOT SCREENED / SCREENING / STANDBY) is decided by `select_verdict()` in
@@ -1521,8 +1674,15 @@ with nanorunner and found the end of a run to be the least truthful moment:
   Store never carried `results_output_directory` launched into a fresh
   `~/.nanometa/data/analysis_<ts>` while the modal promised the described
   folder. It now resolves via `resolve_run_outdir` and pins the directory
-  the modal showed. Root cause still open: `app.layout` is static, so a new
-  tab hydrates app-config from the boot-time config, not the session's.
+  the modal showed. `app.layout` is static, so a new tab hydrates app-config
+  from the boot-time config, not the session's; `hydrate_app_config_from_live_run`
+  reconciles it, but ONLY while the run is active. Once the run ends
+  `backend_manager.config` still holds the launched config, so a per-tick
+  overlay kept reverting a post-run Apply that moved the results folder for
+  the next run (the new folder reads as a divergent tab). Hydration now stands
+  aside when `status.running` is false; a fresh tab opened after the run is
+  adopted by `reseed_config_after_refresh` instead. Pinned in
+  `tests/test_startup_callbacks.py::TestPostRunReconfigurationSurvives`.
 - **Continue into a populated outdir shows the continued run.**
   `get_available_samples` unions the manifest with disk discovery (the
   manifest is written once, at session end, and describes the previous

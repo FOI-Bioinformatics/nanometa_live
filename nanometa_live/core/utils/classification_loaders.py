@@ -27,6 +27,7 @@ from nanometa_live.core.utils.loader_utils import (
     _get_cache_key,
     _is_cache_valid,
     _check_mtime_cache,
+    _mtime_cache_lookup,
     _mtime_cache_state,
     _store_mtime_cache,
     _get_parse_lock,
@@ -396,7 +397,12 @@ def _record_staleness(filepath: str, *, served_fallback: bool) -> None:
         parts = os.path.abspath(filepath).replace("\\", "/").split("/")
         if "kraken2" not in parts:
             return
-        scope = "/".join(parts[: parts.index("kraken2")]) or "/"
+        # The LAST ``kraken2`` component is the results tree's; an earlier
+        # one belongs to the path above it (``/data/kraken2/run/kraken2/..``)
+        # and keyed the scope on the wrong directory, so the banner's query
+        # for the real results dir never saw the flag (audit 2026-11-06, 37).
+        idx = len(parts) - 1 - parts[::-1].index("kraken2")
+        scope = "/".join(parts[:idx]) or "/"
         sample = _report_sample_key(filepath)
         if served_fallback:
             staleness.record_last_good_served(scope, sample)
@@ -832,8 +838,10 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
         # Re-check mtime and TTL cache after acquiring the lock. The first
         # waiter to win the lock parses; subsequent waiters find the
         # result already cached and return without re-parsing. Same
-        # no-isdir-guard rule as above (finding C3).
-        recheck_state, mtime_cached = _mtime_cache_state(
+        # no-isdir-guard rule as above (finding C3). This lookup's
+        # fingerprint is taken BEFORE the parse and is what the result is
+        # stored under (finding 11); the store itself walks nothing.
+        recheck_state, mtime_cached, fingerprint = _mtime_cache_lookup(
             mtime_key, fingerprint_paths
         )
         if recheck_state == "hit":
@@ -847,7 +855,7 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
 
         return _parse_kraken_data_uncached(
             main_dir, sample, cache_key, kraken_dir, mtime_key,
-            fingerprint_paths,
+            fingerprint_paths, fingerprint,
         )
 
 
@@ -1214,11 +1222,16 @@ def _aggregate_to_result_df(agg: Dict[int, List], ordered_taxids: List[int]) -> 
 
 def _cache_and_return(result_df: pd.DataFrame, cache_key: str, mtime_key: str,
                       kraken_dir: str,
-                      fingerprint_paths: Optional[List[str]] = None) -> pd.DataFrame:
+                      fingerprint_paths: Optional[List[str]] = None,
+                      fingerprint: Optional[Tuple[float, int, int]] = None,
+                      ) -> pd.DataFrame:
     """Store result_df in the TTL and mtime caches under the lock, then return it.
 
     ``fingerprint_paths`` must be the same sample-scoped path list used for the
     matching ``_check_mtime_cache`` lookup, or the entry can never be hit.
+    ``fingerprint`` is that lookup's pre-parse fingerprint; without it the
+    store fingerprints now, after the parse, and a report rewritten in between
+    is cached under its new fingerprint with the old frame (finding 11).
     """
     # ONE shared defensive copy for BOTH caches (round 3): the old code
     # stored two independent copies, tripling the resident bytes of every
@@ -1233,6 +1246,7 @@ def _cache_and_return(result_df: pd.DataFrame, cache_key: str, mtime_key: str,
         mtime_key,
         fingerprint_paths if fingerprint_paths is not None else [kraken_dir],
         shared,
+        fingerprint=fingerprint,
     )
     return result_df
 
@@ -1244,13 +1258,15 @@ def _parse_kraken_data_uncached(
     kraken_dir: str,
     mtime_key: str,
     fingerprint_paths: Optional[List[str]] = None,
+    fingerprint: Optional[Tuple[float, int, int]] = None,
 ) -> pd.DataFrame:
     """Parse Kraken2 reports without consulting any cache.
 
     Caller must hold the parse lock for ``cache_key`` and have already
     re-checked the mtime and TTL caches. ``fingerprint_paths`` must match the
-    scope the caller used for its own cache lookup. The function is internal;
-    outside callers should use ``load_kraken_data``.
+    scope the caller used for its own cache lookup, and ``fingerprint`` is
+    the value that lookup computed before any file was read. The function is
+    internal; outside callers should use ``load_kraken_data``.
     """
     if fingerprint_paths is None:
         fingerprint_paths = _sample_fingerprint_paths(kraken_dir, sample)
@@ -1317,7 +1333,8 @@ def _parse_kraken_data_uncached(
         result_df = _aggregate_to_result_df(agg, ordered_taxids)
         if transient_skip:
             return result_df
-        return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir, fingerprint_paths)
+        return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir,
+                                 fingerprint_paths, fingerprint)
 
     # Specific sample - may have multiple batch files to combine.
     sample_files = _discover_sample_reports(kraken_dir, sample)
@@ -1366,7 +1383,8 @@ def _parse_kraken_data_uncached(
         return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
     if len(parsed_frames) == 1 and not transient_skip:
         # Single file: return its DataFrame directly (no aggregation needed).
-        return _cache_and_return(parsed_frames[0], cache_key, mtime_key, kraken_dir, fingerprint_paths)
+        return _cache_and_return(parsed_frames[0], cache_key, mtime_key,
+                                 kraken_dir, fingerprint_paths, fingerprint)
     if len(parsed_frames) == 1:
         return parsed_frames[0]
 
@@ -1378,7 +1396,8 @@ def _parse_kraken_data_uncached(
     result_df = _aggregate_to_result_df(agg, ordered_taxids)
     if transient_skip:
         return result_df
-    return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir, fingerprint_paths)
+    return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir,
+                             fingerprint_paths, fingerprint)
 
 
 def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
@@ -1428,10 +1447,11 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
         latest_path = hit[1]
         if latest_path is not None:
             df = _parse_kraken2_report(latest_path)
-            if df is not None:
-                return df
-        # Memoized "no batch files" (or a vanished winner): fall through
-        # to the standard-report fallback below via an empty candidate set.
+            # An unreadable winner is unmeasured this poll (see below); a
+            # vanished one changes its directory's mtime and misses the memo.
+            return df if df is not None else pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
+        # Memoized "no batch files": the standard-report fallback below is
+        # reached via an empty candidate set.
         candidate_batches = []
     else:
         # 1. Collect candidate batch files and pick the highest-numbered one.
@@ -1461,8 +1481,17 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
         with _latest_batch_memo_lock:
             _latest_batch_memo[memo_key] = (dir_state, latest)
         df = _parse_kraken2_report(latest)
-        if df is not None:
-            return df
+        if df is None:
+            # The winner exists but cannot be read this poll (inside its
+            # stability window, or corrupt). Falling through to the
+            # standard report served a different horizon as "latest batch"
+            # -- in the incremental layout that file is the per-sample
+            # placeholder or the whole-sample total (audit 2026-11-06, 37).
+            # Unmeasured is the honest answer; the next poll retries.
+            logging.debug("Latest batch file for %s unreadable this poll: %s",
+                          sample_name, latest)
+            return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
+        return df
     elif hit is None or hit[0] != dir_state:
         # Remember that this dir state has no batch files, so the fallback
         # path below is also glob-free on the next poll.

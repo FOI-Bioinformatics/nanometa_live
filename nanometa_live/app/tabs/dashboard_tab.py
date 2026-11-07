@@ -79,6 +79,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     _format_time_elapsed,
     _collect_samples_data,
     _generate_alerts,
+    run_status_for_alerts,
     _estimate_pass_rate_from_quality,
     _estimate_classified_rate,
     _get_alerts_badge_color,
@@ -116,9 +117,13 @@ def _batch_progress_verdict_clause(results_dir: Optional[str]) -> Optional[str]:
     try:
         p = batch_progress(results_dir)
         if p.preliminary or p.pending:
+            n = len(p.preliminary) + len(p.pending)
+            if p.ended_early:
+                # The run is over; nothing is classifying any more. The
+                # stopped/error clause beside this one says why.
+                return f"{n} of {len(p.planned)} barcodes not fully classified"
             return (
-                f"preliminary: {len(p.preliminary) + len(p.pending)} of "
-                f"{len(p.planned)} barcodes still classifying"
+                f"preliminary: {n} of {len(p.planned)} barcodes still classifying"
             )
     except Exception:
         pass
@@ -206,6 +211,10 @@ def register_dashboard_callbacks(app: Dash):
             available_samples = _resolve_samples(main_dir, available_samples)
             pipeline_running = status.get("running", False)
             overall_status = _calculate_overall_status(main_dir, config, available_samples, pipeline_running)
+            # The alert engine's run-state inputs (completion, error and
+            # backlog alerts) come from the backend status this callback
+            # already holds; _generate_alerts reads them off this dict.
+            overall_status.update(run_status_for_alerts(status))
             # Include main_dir and samples_data so downstream callbacks don't recompute
             overall_status["_main_dir"] = main_dir
             overall_status["_samples_data"] = _collect_samples_data(main_dir, available_samples)
@@ -362,6 +371,8 @@ def register_dashboard_callbacks(app: Dash):
         )
 
         kraken_has_data = False
+        load_failed = False
+        load_error: Optional[str] = None
         dangerous: List[Dict[str, Any]] = []
         subthreshold: List[Dict[str, Any]] = []
         n_watched = 0
@@ -408,8 +419,12 @@ def register_dashboard_callbacks(app: Dash):
                     kraken_has_data = True
             except Exception as e:
                 logger.error(f"Error updating verdict banner: {e}", exc_info=True)
-                # A load failure falls back to STANDBY, matching the original.
-                main_dir_available = False
+                # A load failure is its own state, RESULTS UNREADABLE: it
+                # used to fall back to STANDBY, which rendered a running run
+                # whose report could not be parsed as "nothing to do"
+                # (field audit 2026-10-28, M1).
+                load_failed = True
+                load_error = f"{type(e).__name__}: {str(e)[:160]}"
                 kraken_has_data = False
                 dangerous = []
                 subthreshold = []
@@ -445,6 +460,11 @@ def register_dashboard_callbacks(app: Dash):
             # the verdict's attribution names the pipeline's grouping.
             input_layout_mismatch=(status or {}).get("input_layout_mismatch"),
             batch_progress_clause=_batch_progress_verdict_clause(main_dir),
+            # Free space on the results volume, polled by the backend each
+            # tick (field audit 2026-10-28, M3).
+            disk_low=(status or {}).get("disk_low"),
+            load_failed=load_failed,
+            load_error=load_error,
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes

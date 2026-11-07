@@ -50,6 +50,19 @@ def _unprocessed_input_note(status: Dict[str, Any], config: Optional[Dict[str, A
             f"(arrived after the run ended)")
 
 
+def _disk_note(status: Dict[str, Any]) -> str:
+    """" -- <disk clause>" while the results volume is below the floor
+    (field audit 2026-10-28, M3). Set per poll by the backend."""
+    text = status.get("disk_low")
+    return f" -- {text}" if text else ""
+
+
+def _completion_note(status: Dict[str, Any]) -> str:
+    """" -- <note>" when a run completed without running a task."""
+    text = status.get("completion_note")
+    return f" -- {text}" if text else ""
+
+
 def _input_layout_note(status: Dict[str, Any]) -> str:
     """" -- <mismatch>" when the inbox layout contradicts the declared
     sample handling (round-5 drills, C13). Set per poll by the backend."""
@@ -254,6 +267,8 @@ def register_status(app, backend_manager):
             details.extend(_running_progress_notes(status, config))
             if status.get("input_layout_mismatch"):
                 details.append(str(status["input_layout_mismatch"]))
+            if status.get("disk_low"):
+                details.append(str(status["disk_low"]))
 
             if status.get("last_update"):
                 timestamp = time.strftime(
@@ -270,8 +285,10 @@ def register_status(app, backend_manager):
 
         if status.get("pipeline_status") == "completed":
             return ("blue", "Complete",
-                    "Pipeline finished successfully" + unprocessed_note
-                    + _skipped_tasks_note(status) + _input_layout_note(status))
+                    "Pipeline finished successfully" + _completion_note(status)
+                    + unprocessed_note
+                    + _skipped_tasks_note(status) + _input_layout_note(status)
+                    + _disk_note(status))
 
         # A stopped run is neither idle nor complete (round-4 audit, H2): say
         # why it ended, when, and how far it got, instead of inviting a Start.

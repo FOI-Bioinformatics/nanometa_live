@@ -45,14 +45,17 @@ class TestUpdateInterval:
         assert fn({"update_interval_seconds": 10}, self._RUNNING) == 10000
 
     def test_backs_off_when_idle(self, core_app):
+        # Past the warm-up ticks (field audit 2026-10-28, M8): the first
+        # polls after boot stay at the active cadence so existing results
+        # render within seconds rather than after the idle interval.
         fn = _callback_fn(core_app, "update-interval.interval")
         # idle uses idle_update_interval_seconds (or max(base, 60))
         assert fn({"update_interval_seconds": 10,
-                   "idle_update_interval_seconds": 60}, self._IDLE) == 60000
+                   "idle_update_interval_seconds": 60}, self._IDLE, 5) == 60000
 
     def test_idle_default_floor_when_unset(self, core_app):
         fn = _callback_fn(core_app, "update-interval.interval")
-        assert fn({"update_interval_seconds": 10}, self._IDLE) == 60000
+        assert fn({"update_interval_seconds": 10}, self._IDLE, 5) == 60000
 
     def test_starting_counts_as_active(self, core_app):
         fn = _callback_fn(core_app, "update-interval.interval")

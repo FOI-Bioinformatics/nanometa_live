@@ -75,6 +75,12 @@ class BackendManager:
         # Note: legacy _prep_status_lock removed along with prepare_data methods
         self._lock_fd: Optional[IO] = None  # File lock descriptor for multi-user safety
         self._lock_file_path: Optional[str] = None  # Path to lock file
+        self._lock_info: Dict[str, Any] = {}  # What the held lock file says
+        # Bumped on every _acquire_lock. A monitor thread captures the value
+        # at its start and may release only THAT lock: run 1's thread used to
+        # wake from its final sleep after run 2 had taken a new lock and
+        # close run 2's descriptor (audit 2026-11-06, finding 12).
+        self._lock_generation = 0
         # Start/stop transition state for the async click path. start() and
         # stop() block for tens of seconds (preflight probes, process.wait);
         # the GUI runs them in a daemon THREAD in this process -- the
@@ -213,6 +219,12 @@ class BackendManager:
         try:
             os.kill(pid, 0)  # Signal 0 checks existence without affecting process
             return True
+        except PermissionError:
+            # The process exists but belongs to another user: signal 0 is
+            # refused, which is proof of life, not of death. Returning False
+            # here called another operator's live lock stale (audit
+            # 2026-11-06, finding 27).
+            return True
         except (OSError, ProcessLookupError):
             return False
 
@@ -245,29 +257,37 @@ class BackendManager:
             Tuple of (success: bool, message: str)
         """
         lock_file = os.path.join(results_dir, ".nanometa.lock")
-        self._lock_file_path = lock_file
+        # _lock_file_path is recorded only once the lock is OURS (below):
+        # set before the attempt, a refused acquire left it naming another
+        # instance's live lock, which the next _release_lock() deleted.
 
-        # Check for stale lock from a crashed process
-        if os.path.exists(lock_file):
-            try:
-                with open(lock_file, 'r') as f:
-                    lock_data = json.load(f)
-                pid = lock_data.get("pid")
-                if pid and not self._process_exists(pid):
-                    logging.info(
-                        f"Removing stale lock file (PID {pid} no longer running)"
-                    )
-                    os.remove(lock_file)
-            except (json.JSONDecodeError, OSError):
-                pass  # If we cannot read the lock file, proceed to try acquire
+        # A lock left by a GUI that died is stale only if the pipeline it
+        # launched died with it. Nextflow is started in its own session and
+        # survives the GUI, and the lock used to record the GUI's PID alone,
+        # so the next launch read the dead GUI, called the lock stale, and
+        # started a second pipeline into the same outdir and work dir
+        # (field audit 2026-10-28, H3). The pipeline's own PID is recorded
+        # once it is known (_record_nextflow_pid); while that process lives
+        # the folder is busy, whoever started it.
+        orphan = self.read_orphan_run(results_dir)
+        if orphan:
+            msg = self._orphan_message(orphan)
+            logging.error(msg)
+            return False, msg
+        self._reclaim_stale_lock(lock_file)
 
         try:
-            # Create/open lock file
-            self._lock_fd = open(lock_file, 'w')
+            # Open without truncating: 'w' emptied the holder's JSON before
+            # flock could refuse, so a second instance reported an empty
+            # "Lock info". Truncate only once the lock is ours.
+            self._lock_fd = open(lock_file, 'a+')
 
             # Try to acquire exclusive, non-blocking lock
             if fcntl:
                 fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self._status_lock:
+                self._lock_file_path = lock_file
+                self._lock_generation += 1
 
             # Write lock info for debugging
             lock_info = {
@@ -277,28 +297,15 @@ class BackendManager:
                 "acquired_at": datetime.now().isoformat(),
                 "data_dir": self.data_dir
             }
-            self._lock_fd.write(json.dumps(lock_info, indent=2))
-            self._lock_fd.flush()
+            self._lock_info = lock_info
+            self._write_lock_info()
 
             logging.info(f"Acquired lock on results directory: {results_dir}")
             return True, "Lock acquired successfully"
 
         except BlockingIOError:
             # Another process has the lock
-            existing_info = ""
-            try:
-                with open(lock_file, 'r') as f:
-                    existing_info = f.read()
-            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
-                pass
-
-            error_msg = (
-                f"Another pipeline is already running in this directory. "
-                f"Lock file: {lock_file}"
-            )
-            if existing_info:
-                error_msg += f"\nLock info: {existing_info}"
-
+            error_msg = self._held_lock_message(lock_file)
             logging.error(error_msg)
             self._lock_fd = None
             return False, error_msg
@@ -310,12 +317,128 @@ class BackendManager:
                 self._lock_fd = None
             return False, f"Error acquiring lock: {e}"
 
-    def _release_lock(self) -> None:
+    @classmethod
+    def _reclaim_stale_lock(cls, lock_file: str) -> None:
+        """Remove a lock whose GUI is dead (the orphan check ran first)."""
+        if not os.path.exists(lock_file):
+            return
+        try:
+            with open(lock_file, 'r') as f:
+                lock_data = json.load(f)
+            pid = lock_data.get("pid")
+            if pid and not cls._process_exists(pid):
+                logging.info(
+                    f"Removing stale lock file (PID {pid} no longer running)"
+                )
+                os.remove(lock_file)
+        except (json.JSONDecodeError, OSError):
+            pass  # If we cannot read the lock file, proceed to try acquire
+
+    @staticmethod
+    def _held_lock_message(lock_file: str) -> str:
+        """The refusal when another live process holds the lock."""
+        existing_info = ""
+        try:
+            with open(lock_file, 'r') as f:
+                existing_info = f.read()
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
+            pass
+        error_msg = (
+            f"Another pipeline is already running in this directory. "
+            f"Lock file: {lock_file}"
+        )
+        if existing_info:
+            error_msg += f"\nLock info: {existing_info}"
+        return error_msg
+
+    def _write_lock_info(self) -> None:
+        """Rewrite the lock file from ``self._lock_info`` (lock held)."""
+        if not self._lock_fd:
+            return
+        try:
+            self._lock_fd.seek(0)
+            self._lock_fd.truncate()
+            self._lock_fd.write(json.dumps(self._lock_info, indent=2))
+            self._lock_fd.flush()
+        except (OSError, ValueError) as e:
+            logging.warning(f"Could not write lock info: {e}")
+
+    def _record_nextflow_pid(self, pid: int) -> None:
+        """Add the pipeline's PID to the held lock, once it is known.
+
+        The PID exists only after the launch thread's Popen, which is after
+        the lock is taken, so the monitor loop records it on its first poll
+        that sees one. A GUI that dies afterwards leaves a lock that names
+        the process still writing the folder.
+        """
+        if not self._lock_fd or self._lock_info.get("nextflow_pid") == pid:
+            return
+        self._lock_info["nextflow_pid"] = pid
+        self._lock_info["nextflow_started_at"] = datetime.now().isoformat()
+        self._write_lock_info()
+
+    @classmethod
+    def read_orphan_run(cls, results_dir: Optional[str]) -> Optional[Dict[str, Any]]:
+        """A pipeline still running in ``results_dir`` that no live GUI owns.
+
+        Returns the lock's record (``nextflow_pid``, ``acquired_at``,
+        ``nextflow_started_at``, ``user``, ``hostname``, ``lock_file``)
+        when the lock names a Nextflow PID that is alive and the GUI that
+        took the lock is not, or is not this process. None otherwise:
+        no lock, no PID recorded, the pipeline finished, or the lock
+        belongs to this very process.
+        """
+        if not results_dir:
+            return None
+        lock_file = os.path.join(results_dir, ".nanometa.lock")
+        try:
+            with open(lock_file, "r") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        nf_pid = data.get("nextflow_pid")
+        try:
+            nf_pid = int(nf_pid)
+        except (TypeError, ValueError):
+            return None
+        if nf_pid <= 0 or not cls._process_exists(nf_pid):
+            return None
+        if data.get("pid") == os.getpid():
+            return None
+        record = {k: data.get(k) for k in (
+            "nextflow_pid", "nextflow_started_at", "acquired_at", "user",
+            "hostname", "pid",
+        )}
+        record["nextflow_pid"] = nf_pid
+        record["results_dir"] = results_dir
+        record["lock_file"] = lock_file
+        return record
+
+    @staticmethod
+    def _orphan_message(orphan: Dict[str, Any]) -> str:
+        started = orphan.get("nextflow_started_at") or orphan.get("acquired_at") or "unknown time"
+        return (
+            "A pipeline started by an earlier Nanometa Live session is still "
+            f"running in {orphan['results_dir']} (Nextflow PID "
+            f"{orphan['nextflow_pid']}, started {started}). Its results keep "
+            "arriving in that folder but this session is not attached to it. "
+            "Wait for it to finish, or stop it first with: "
+            f"kill {orphan['nextflow_pid']}"
+        )
+
+    def _release_lock(self, generation: Optional[int] = None) -> None:
         """
         Release the exclusive lock on results directory.
 
-        Safe to call even if no lock is held.
+        Safe to call even if no lock is held. With ``generation`` (the value
+        of ``_lock_generation`` the caller captured when its run started),
+        the release is a no-op once a newer lock has been taken: the lock
+        then belongs to a later run and is that run's to release.
         """
+        if generation is not None and generation != self._lock_generation:
+            return
         if self._lock_fd:
             try:
                 if fcntl:
@@ -456,6 +579,16 @@ class BackendManager:
         # it; leaving it behind would show run A's verdict on the Reports
         # tab during run B.
         "report",
+        # REALTIME_STATISTICS output (cumulative_stats.json, alerts.json):
+        # the Reports tab's throughput panel reads it, so a previous
+        # real-time run's figures stood for a whole batch run (audit
+        # 2026-11-06, finding 24). The read-filter outputs, the assembly
+        # tree and the real-time reports are results of the run too.
+        "realtime_stats",
+        "realtime_reports",
+        "chopper",
+        "filtlong",
+        "assembly",
     )
 
     @staticmethod
@@ -814,6 +947,11 @@ class BackendManager:
         if not self.config:
             return False, "No configuration loaded"
 
+        # The previous run's monitor thread may still be inside its last
+        # sleep. Its lock release is generation-guarded, so it can no longer
+        # touch this run's lock; waiting briefly keeps one monitor per run.
+        self._join_previous_monitor()
+
         # Check if resume is requested but not possible
         if resume and not self.can_resume():
             logging.warning("Resume requested but no previous run found. Starting fresh.")
@@ -850,12 +988,7 @@ class BackendManager:
         # Persist input fingerprint so the next launch can detect when
         # the operator is about to point a different input at this
         # outdir (the case where mixing data is hardest to spot later).
-        outdir_for_meta = (
-            self.config.get("results_output_directory")
-            or self.config.get("main_dir")
-            or results_dir
-        )
-        BackendManager.write_run_metadata(outdir_for_meta, self.config)
+        BackendManager.write_run_metadata(self._run_outdir(), self.config)
 
         # A new run begins: whatever the loader caches hold belongs to the
         # previous run (or the previous view of this outdir). Drop it all so
@@ -872,6 +1005,27 @@ class BackendManager:
 
         logging.info(f"Backend started successfully with profile: {profile}")
         return True, self._start_message(profile)
+
+    def _run_outdir(self) -> str:
+        """The directory this run's metadata lives in.
+
+        One resolution for ``write_run_metadata`` at Start and
+        ``_record_final_status`` at the end: the latter read
+        ``results_output_directory`` alone, so a config carrying only
+        ``main_dir`` had its start record written and its terminal status
+        never recorded (audit 2026-11-06, finding 37).
+        """
+        return self._lock_target_dir()
+
+    def _join_previous_monitor(self, timeout: float = 2.0) -> None:
+        """Wait briefly for the previous run's monitor thread to exit."""
+        thread = self.status_thread
+        if thread is None or thread is threading.current_thread() or not thread.is_alive():
+            return
+        thread.join(timeout=timeout)
+        if thread.is_alive():
+            logging.warning("Previous status monitor is still running; "
+                            "its lock release is generation-guarded")
 
     def _start_message(self, profile: str) -> str:
         """The Start toast's text, carrying any launch warning.
@@ -942,6 +1096,12 @@ class BackendManager:
         if not self.status.get("running"):
             return False, "Backend is not running"
 
+        # Nextflow may have exited inside the monitor's 5 s poll window; a
+        # Stop then stops nothing and must not relabel the finished run as
+        # stopped by the operator (audit 2026-11-06, finding 8).
+        if not self._workflow_reports_running():
+            return self._reconcile_finished_run()
+
         # Declare the intent first: workflow_manager.stop() blocks for up to
         # 30 s, and the monitor thread polls in that window (round-4 H3).
         self._mark_stop_intent("operator")
@@ -949,8 +1109,13 @@ class BackendManager:
         # Stop the Nextflow workflow
         success, message = self.workflow_manager.stop()
         if not success:
-            # Still release lock even if stop fails
-            self._release_lock()
+            if not self._workflow_reports_running():
+                # It ended on its own while we were asking.
+                return self._reconcile_finished_run()
+            # The pipeline may still be alive: it keeps its lock, its
+            # running state and its own classification when it exits. The
+            # failed Stop changed nothing, so the intent is withdrawn.
+            self._stop_intent = None
             return False, message
 
         # Release exclusive lock on results directory
@@ -973,6 +1138,35 @@ class BackendManager:
 
         logging.info("Backend stopped successfully")
         return True, "Backend stopped successfully"
+
+    def _workflow_reports_running(self) -> bool:
+        """Whether the workflow manager still reports a live pipeline."""
+        try:
+            return bool(self.workflow_manager.get_status().get("running"))
+        except (AttributeError, TypeError):
+            return bool(getattr(self.workflow_manager, "running", False))
+
+    def _reconcile_finished_run(self) -> Tuple[bool, str]:
+        """Record a run that ended before Stop could reach it.
+
+        The monitor thread would classify it on its next poll; doing it
+        here, from the same workflow status and through the same
+        ``_apply_terminal_workflow_status``, means a Stop pressed in that
+        window reads exactly as if it had not been pressed. No stop intent
+        is left behind: nothing was stopped.
+        """
+        workflow_status = self.workflow_manager.get_status()
+        with self._status_lock:
+            self._stop_intent = None
+            run_completed = False
+            if self.status.get("running"):
+                run_completed = self._apply_terminal_workflow_status(workflow_status)
+            self._release_lock()
+        if run_completed:
+            self._auto_generate_report()
+        outcome = self.status.get("pipeline_status")
+        logging.info("Stop requested after the pipeline exited; run recorded as %s", outcome)
+        return True, f"Pipeline had already finished; run recorded as {outcome}"
 
     def _mirror_workflow_fields(self, workflow_status: Dict[str, Any]) -> None:
         """Copy the per-poll process, batch and stage fields into status.
@@ -1171,6 +1365,15 @@ class BackendManager:
                     self.config.get("sample_handling"), root_files, dirs_with_reads,
                 )
 
+            # Free space on the results volume, same cadence as the file
+            # count (field audit 2026-10-28, M3). The readiness floor only
+            # runs at Start; a 24-barcode overnight run fills a laptop SSD
+            # after it.
+            from nanometa_live.core.utils.disk_space import free_gb, low_disk_message
+            free = free_gb(self._lock_target_dir())
+            self.status["disk_free_gb"] = None if free is None else round(free, 1)
+            self.status["disk_low"] = low_disk_message(free)
+
             # Update status with waiting files
             # Processed files comes from workflow_manager status
             self.status["files_waiting"] = waiting_files
@@ -1219,11 +1422,19 @@ class BackendManager:
         last_progress_monotonic = time.monotonic()
         last_finished_count = -1
         pipeline_has_worked = False
+        # The lock this thread may release, and the run it monitors. A
+        # later start() bumps the generation; this thread then neither
+        # releases the new lock nor keeps polling as a second monitor.
+        with self._status_lock:
+            generation = self._lock_generation
 
-        while self.status.get("running"):
+        while self.status.get("running") and self._lock_generation == generation:
             try:
                 # Get workflow manager status (also drives progress tracking)
                 workflow_status = self.workflow_manager.get_status()
+                nf_pid = workflow_status.get("nextflow_pid")
+                if nf_pid:
+                    self._record_nextflow_pid(int(nf_pid))
 
                 # Progress signal: tasks running now, or the cumulative finished
                 # (completed + failed) count advanced since the last poll. Either
@@ -1261,6 +1472,12 @@ class BackendManager:
                     if not workflow_status.get("running"):
                         run_completed = self._apply_terminal_workflow_status(
                             workflow_status)
+                        # Release here, under the lock and before the
+                        # sleep: a Start inside the sleep used to acquire a
+                        # new lock that the unconditional release after the
+                        # loop then closed (finding 12).
+                        if not self.status.get("running"):
+                            self._release_lock(generation)
 
                     # Update process information
                     self.status["processes_running"] = workflow_status.get("processes_running", 0)
@@ -1289,8 +1506,10 @@ class BackendManager:
                 logging.exception(f"Error in monitoring thread: {e}")
                 time.sleep(5)
 
-        # Release lock when monitoring thread exits (pipeline completed or stopped)
-        self._release_lock()
+        # Release lock when monitoring thread exits (pipeline completed or
+        # stopped) -- this run's lock only, never a successor's.
+        with self._status_lock:
+            self._release_lock(generation)
         logging.info("BackendManager status monitoring stopped")
 
     def _finish_with_isolated_failures(self, processes_failed, failed_tasks) -> None:
@@ -1389,6 +1608,19 @@ class BackendManager:
             self._record_final_status()
             return True
 
+        if exit_code == 0:
+            # Nextflow exited cleanly without running a task: a real-time
+            # run whose timer fired before any file arrived, or an input
+            # folder that held nothing to classify. Not a crash (field audit
+            # 2026-10-28, M2); the header says what happened.
+            self.status["pipeline_status"] = "completed"
+            self.status["running"] = False
+            self.status["completion_note"] = (
+                "no task ran - no input file reached the pipeline")
+            logging.warning("Pipeline completed without running any task")
+            self._record_final_status()
+            return True
+
         # No completed processes and no errors -- likely a crash during
         # startup or configuration.
         self._fail_run(["Pipeline process terminated unexpectedly. "
@@ -1422,7 +1654,11 @@ class BackendManager:
         # round 5, A19: batch3 after two failed starts).
         self.status["errors"] = []
         workflow_status = getattr(self.workflow_manager, "status", None)
-        if isinstance(workflow_status, dict):
+        # A launcher that has ALREADY reported its exit (a launch thread that
+        # failed before Popen) holds this run's error, not the previous
+        # run's; the launcher clears its own record at launch
+        # (reset_run_artifacts), so only a live launcher is cleared here.
+        if isinstance(workflow_status, dict) and workflow_status.get("running", True):
             workflow_status["errors"] = []
 
     def _mark_stop_intent(self, reason: str) -> None:
@@ -1474,7 +1710,7 @@ class BackendManager:
         classification itself.
         """
         try:
-            outdir = (self.config or {}).get("results_output_directory") or ""
+            outdir = self._run_outdir() if self.config else ""
             if not outdir or not os.path.isdir(outdir):
                 return
             path = os.path.join(outdir, self.RUN_METADATA_FILENAME)

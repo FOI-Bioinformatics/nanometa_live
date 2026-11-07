@@ -6,8 +6,414 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`nanometa-prepare doctor` row "nf-schema plugin".** nanometanf pins an
+  nf-schema version (3.0.0 since 2026-10-29) and Nextflow fetches it from
+  registry.nextflow.io when the plugin cache lacks it. Two paths depend on
+  the cache rather than the network: a GUI Start seeds each run's `NXF_HOME`
+  from `~/.nextflow` and a bundle export copies `nf-schema-<ver>` from the
+  cache, so a build machine without it shipped an air-gapped bundle that
+  failed at the registry probe. The row reads the pin from the checkout
+  (`--pipeline`, else the default pulled checkout under `NXF_ASSETS` /
+  `NXF_HOME/assets` / `~/.nextflow/assets`), lists the cached versions and
+  names the one command to run while online. `_seed_nextflow_home` now links
+  `plugins/` beside `framework/` and `capsule/`, so the cached plugin is what
+  a per-run home sees. The log scanner also recognises nf-schema's
+  "Value is [string] but should be [integer]" as a wrong-typed parameter.
+  The doctor's checks moved from `cli/prepare.py` into `cli/doctor.py`
+  (the former crossed the 800-line code-size gate); `prepare` re-exports the
+  names. The Java row now shows the `java -version` line that names the
+  version rather than a `Picked up JAVA_TOOL_OPTIONS` banner.
+
 ### Fixed
 
+- **A post-run Apply that moves the results folder survives.**
+  `hydrate_app_config_from_live_run` overlaid the launched config
+  (`backend_manager.config`, set at Start and kept after the run ends) onto a
+  tab whose resolved results dir differed from the run's, on every tick. Once
+  a run finished and the operator applied a new results folder for the next
+  run, that tab's new folder differed from the finished run's, so it read as a
+  fresh "tab holding another folder" and was reverted to the old run's config
+  on the next poll. Hydration now acts only while `status.running`; after the
+  run ends the operator reconfigures freely, and a fresh tab opened afterwards
+  is adopted by `reseed_config_after_refresh` (which already fires for a
+  completed, errored or stopped run) rather than here. Pinned in
+  `tests/test_startup_callbacks.py::TestPostRunReconfigurationSurvives`; every
+  mid-run hydration test is unchanged.
+- **An NCBI watchlist name matches its GTDB counterpart without a taxid
+  mapping.** The live name matcher (`TaxonomyMatcher.build_entry_index` /
+  `match_row_indexed`, used by the dashboard's detection pass, the exported
+  report's threat screen and the custom-watchlist alert resolver) indexed
+  only an entry's cheap name forms, never the speculative GTDB genus-suffix
+  forms. So on a GTDB database the operator had not scanned into a taxid
+  mapping, an entry named `Bacillus anthracis` could not reach a report row
+  named `Bacillus_A anthracis`: the genus differs, so the genus+species and
+  substring tiers both miss, and the only bridge -- the taxid-mapping
+  collection -- was absent. `build_entry_index` now takes
+  `generates_gtdb_variants` and, when set, indexes each entry's GTDB
+  genus-suffix forms at the variant tier, exactly as the taxid-mapping
+  `match_strategies` gate them. The flag is derived from
+  `DatabaseProfile.generates_gtdb_variants` (GTDB or undetectable
+  nomenclature; unknown counts as generate, so a GTDB report is never
+  silently missed before indexing) at all three call sites, folded into the
+  manager's index cache key, and off by default so the NCBI path and every
+  existing caller are unchanged. Pinned in
+  `tests/test_gtdb_suffix_matching.py`.
+- **A custom watchlist entry with no `alert_threshold` screens at its threat
+  level's default, not a flat 10.** Three paths defaulted an unstated
+  threshold to 10 where `WatchlistEntry.from_dict` derived it from the threat
+  level (critical 5 / high 10 / moderate 50 / low 100): the `PathogenEntry`
+  dataclass field, `PathogenDatabase._load_user_watchlist`'s `defaults` dict,
+  and the custom-entry branch of `check_for_dangerous_pathogens`. The same
+  custom critical entry therefore alerted at 5 reads on the dashboard's
+  watchlist pass and at 10 through the alert database, and a critical entry
+  loaded straight from YAML was half as sensitive as the table intends.
+  `alert_threshold` is now `None`-when-unstated everywhere and derived through
+  the one `default_alert_threshold` table; an explicit operator value is
+  always kept. The Watchlist tab's pathogen row shows the derived value rather
+  than a flat placeholder, and `docs/configuration.md` states the per-threat
+  defaults. Pinned in `tests/test_custom_watchlist_threshold_default.py`
+  alongside the existing `tests/test_alert_threshold_single_default.py`.
+
+- **A mid-run Apply Settings survives the next tick.**
+  `hydrate_app_config_from_live_run` copied the live config (what the
+  pipeline was launched with; Apply never changes it) over every tab's
+  `app-config` on every poll while a run existed, so a
+  `negative_control_samples`, `min_reads_for_validation` or
+  `update_interval_seconds` applied mid-run was reverted within one poll
+  while the toast promised it took effect now (bug audit 2026-11-06,
+  finding 13). A tab that already carries the run's results dir has been
+  hydrated and now receives only the running-run path keys
+  (`RUNNING_RUN_PATH_KEYS`, the set `pin_running_run_paths` holds on
+  Apply); a tab without it, or holding another folder, still receives the
+  live config wholesale.
+
+- **The alert engine receives the run's real state.** `_generate_alerts`
+  read `running`, `completed`, `error_count`, `pending_files` and
+  `processed_files` off the overall-status dict, which nothing wrote, so
+  the completion, error and backlog alerts could never fire (bug audit
+  2026-11-06, item 37). `compute_overall_status_cache` now merges
+  `run_status_for_alerts(backend_status)` into the cache, translating the
+  backend's `files_processed` / `files_waiting` / `errors` to the engine's
+  names. The dead `active_alerts` key, "calculated later" by nothing, is
+  gone.
+- **A launch that failed before Popen no longer stays "running"** (audit
+  2026-11-06, finding 6; 198 of 200 launches on the reproduction).
+  `NextflowManager.start` sets the running flags before it spawns the
+  launch thread, so a thread that fails at once (unwritable log, offline
+  mode with a missing conda cache) has the last word; the monitor then
+  records PIPELINE ERROR with the launcher's own message instead of
+  showing SCREENING until an operator Stop labelled the run stopped.
+- **A Stop pressed after Nextflow exited keeps the run's real outcome**
+  (finding 8). `BackendManager.stop` asks the workflow manager first and,
+  when the pipeline is already gone, classifies through the same terminal
+  path the monitor uses -- a completed run stays completed and no
+  `stop_reason: operator` is written. A Stop that fails while the pipeline
+  may still be alive keeps the lock and the running state.
+- **The finished run's monitor thread no longer releases the next run's
+  lock** (finding 12). The lock is released under the status lock before
+  the monitor's final sleep, every release carries the lock generation the
+  thread started with, the loop exits when a newer run begins, and
+  `start()` joins a live previous monitor briefly. Companion: a refused
+  `_acquire_lock` no longer adopts the holder's lock path, and
+  `_record_final_status` writes where `write_run_metadata` wrote.
+- **A PID another user owns is alive, not stale.** `_process_exists`
+  returned False on `PermissionError`, calling another operator's live lock
+  stale (finding 27).
+- **The Nextflow report, timeline and trace exist on a GUI run** (finding
+  23). `-with-trace`/`-with-report`/`-with-timeline` replace nanometanf's
+  `pipeline_info/` targets rather than copying them, and all three pointed
+  at `<data_dir>/logs/`, so the Reports tab's three Nextflow entries were
+  always absent and the export never carried them. The launcher now names
+  the trace `<outdir>/pipeline_info/execution_trace_<ts>.txt` (the status
+  poller reads that path) and sends no report/timeline flag; the pipeline's
+  config writes both.
+- **Archive moves `realtime_stats/`, `realtime_reports/`, `chopper/`,
+  `filtlong/` and `assembly/`** (finding 24). Left behind, a previous
+  real-time run's throughput figures stood on the Reports tab for a whole
+  batch run.
+- **On-demand validation launches under the machine's ceilings** (finding
+  32): the command carries `--max_memory` and `--max_cpus` from the same
+  resolver the main launch uses (`resource_ceiling_params`). BLAST and
+  minimap2 asked `8.GB * attempt` under the pipeline's 16 GB default, so an
+  8 GB laptop aborted where the main run had been clamped.
+- **On-demand results are written atomically and read back under the key
+  they were written with** (finding 35). `_save_results` claimed
+  write-then-rename and did a plain write; it wrote `percent_validated`
+  where `load_validation_result` read `validation_rate`, so a reloaded
+  result carried 0.0.
+- **The GUI reads the incremental classifier's per-read output** (finding
+  4, GUI side). `ReadExtractor` resolves
+  `kraken2/<sample>.cumulative.kraken2.output.txt`, else every
+  `kraken2/<sample>/batches/batch_N.kraken2.output.txt`, before the flat
+  standard-branch names it alone looked for; `parameter_mapping` sends
+  `save_reads_assignment` / `save_output_fastqs` when the config sets them,
+  not only when watchlist validation runs. The pipeline half (publishing
+  the classified FASTQ and a flat per-read output in incremental mode) is
+  nanometanf WP2a; CLAUDE.md states what the pipeline publishes today.
+- **Compatibility floor is nanometanf 1.12.0** (finding 28): the first
+  version that accepts the digit-only `sample_name`, the single-taxid
+  `taxids_to_validate` and the schema-validated `--validation_only` the GUI
+  sends. A `1.12.0dev` checkout passes as the development pre-release of
+  the floor; 1.11.0 is refused by name.
+- **Three probes looked at the wrong thing** (finding 37): the readiness
+  "Input Directory" check counts top-level `*.fq*` beside `*.fastq*`;
+  `_check_db_index` and `mobile_lab_preparer` probed a `{db_hash}_index.pkl`
+  that `TaxidMapper` deletes and rebuilds (the preparer's skip-existing
+  never skipped; the readiness row passed on a pickle-only install), both
+  now probe the `_index.json` the mapper writes.
+- **The validation parser re-probes its layout on every read** (audit
+  2026-11-06, finding 7). The shared `ValidationParser` chose between
+  `blast_validation/`, `validation/blast/`, `validation/` and `blast/` once,
+  at construction. With `validation_method: both` minimap2 finishes first,
+  so the parser built on the first poll pinned `validation/`, and every
+  `blast.tsv` published later into `validation/blast/` was outside its glob:
+  the BLAST sub-tab stayed empty for the life of the process while a fresh
+  parser found the result. The layout is now probed at the start of each
+  read (four `exists` calls; a changed answer drops the results cache), and
+  nanometanf's `validation/blast/` is globbed for TSVs and their stats
+  sidecars even when a legacy top-level directory resolves first.
+
+- **A stability-window skip is transient in every loader, not only the
+  Kraken2 ones** (finding 10). The validation parser, the three fastp
+  loaders and the seqkit batch loader skipped a file younger than one
+  second and then cached the reduced result under a fingerprint that
+  already included that file. The window closes by time passing, which
+  changes no mtime, so the file stayed out of the totals until something
+  else changed under the directory: in batch mode the last fastp JSON
+  written was missing from the QC totals, in real time a BLAST pair caught
+  mid-rewrite disappeared. `loader_utils.StabilitySkips` records the skip
+  and the store is withheld on that call, the `transient_skip` rule the
+  Kraken2 loaders already followed.
+
+- **The mtime-cache fingerprint is taken before the parse, not after**
+  (finding 11). `_store_mtime_cache` fingerprinted the sample's files at
+  store time; a cumulative report rewritten between parse and store was
+  cached under its new fingerprint with the frame parsed from the old
+  content and served as `hit` until the next rewrite -- permanently when
+  the rewrite was the run's last (the file said 999, three reloads returned
+  100). `_mtime_cache_lookup` returns the fingerprint that decided the
+  miss, and `load_kraken_data`, the fastp/nanoplot/seqkit loaders and
+  `load_blast_validation_data` store under it. No extra filesystem walk:
+  the store no longer computes one.
+
+- **The on-disk BLAST fallback divides by the clade** (finding 22).
+  `load_blast_validation_data`'s `blast.tsv` fallback took the per-rank
+  `reads` column as its denominator while the pipeline validates the clade
+  (`KreportTree.cladeOf`); on the documented *F. tularensis* report (3,406
+  direct / 9,602 clade) the rate read 282%. It now uses `cumul_reads`
+  (falling back to `reads`), clamps the rate to 100, and keys its cache
+  entry on the sample's Kraken2 reports as well as `validation/`, so a
+  report that advances is not served with the old rate.
+
+- Four cache-hygiene items from the same audit (37): `_file_mapping_cache`
+  is cleared by `invalidate_sample_cache` (the inventory listed it as
+  cleared at a run boundary while nothing cleared it, so a new run into the
+  same outdir could be answered with the previous run's file mapping); the
+  staleness scope is the parent of the LAST `kraken2` path component, so a
+  results tree under a directory itself named `kraken2` is flagged under
+  the right scope; `paf_breadth`'s cache is read, evicted and written under
+  a lock (two callback threads scanned and inserted concurrently); and
+  `load_kraken_latest_batch` returns an empty frame when the batch winner
+  exists but cannot be read this poll instead of falling through to the
+  standard report, which is a different horizon (the incremental layout's
+  placeholder or whole-sample total).
+- **Fuzzy name matching no longer binds a watchlist entry to a congener.**
+  `FuzzyMatchStrategy` scored the whole name at 0.85, and its candidates all
+  share a genus, so `burkholderia mallei` against `burkholderia pseudomallei`
+  scored 0.864 and was accepted -- a melioidosis sample raised a glanders
+  (Tier 1) alert under the wrong organism's name, with no ambiguity
+  disclosure. The species epithets are now compared on their own at the same
+  threshold: a typo inside one epithet still matches, a GTDB polyphyly suffix
+  is not a difference, and a genus- or family-level entry is not gated.
+
+- **The exported report screens the watchlist through the taxid mapping and
+  the matcher.** `_match_entry_rows` compared `db_taxid or taxid` against the
+  frame's taxid column and fell back to an exact lowercase name compare, so on
+  a GTDB/flextaxd database *Bacillus anthracis* (NCBI 1392) against the row
+  `Bacillus_A anthracis` (4005020) matched nothing: every entry read
+  `detected=False` and the report printed the green "NO WATCHED ORGANISMS
+  DETECTED" for a run the dashboard alarmed on. Row resolution moved to
+  `core/export/watchlist_screen.py`, which adds the mapping collection's
+  `db_taxid` and routes the name fallback through `TaxonomyMatcher` at the 0.7
+  alert floor; the collection is loaded from `{db_hash}_mappings.json` when the
+  export runs in a worker with no singleton.
+
+- **A bare trinomial watchlist entry resolves to its subspecies node.**
+  `parse_binomial` set the subspecies only for the explicit `subsp.` spelling,
+  so *Francisella tularensis holarctica* generated only species-level variants
+  and landed on the parent species wherever the database writes `subsp.` --
+  collapsing Type A and Type B onto one match. A trinomial's third word is now
+  the subspecies epithet (rank words, serovar codes and strain numbers
+  excluded) and the `subsp.` form is generated ahead of the species fallback.
+
+- **A watchlist override lands on the entry it names.** `_apply_override`
+  indexed `_entries[taxid]` while a fork entry -- same NCBI taxid, different
+  `db_taxid` -- is stored under its own key, so an override for one of the
+  Bioshield *E. coli* variants moved another organism's threshold. It resolves
+  through `resolve_entry_key`, and each exported override record now carries
+  `db_taxid` and `name` so a session round trip can identify its entry.
+
+- **A config naming a missing watchlist without `enabled` is reported.**
+  `unresolved_watchlist_ids` defaulted the block's `enabled` to False where the
+  loader defaults it True, so such a config loaded zero entries while the
+  CRITICAL "Watchlist Files" row and the startup toast stayed silent.
+
+- **The validation launch parameters fall back to `default_config()`.**
+  `_validation_params` carried its own literals and two diverged:
+  `validation_method` fell back to `blast` against a default of `minimap2`, and
+  `e_val_cutoff` to `1e-10` against `0.01`. Invisible for a config read from
+  disk, decisive for one built in code -- confirmation testing then ran a
+  method the operator never chose at an e-value two orders of magnitude
+  stricter.
+
+- **The report's "Top Organisms" sorts on clade reads.** It sorted on the
+  per-rank `reads` column while displaying Kraken2's clade `%`, so
+  *F. tularensis* at 60% of a run ranked below *E. coli* at 2% and could fall
+  off the end of the table.
+
+- **A taxid mapping is keyed by entry identity.** Several watchlist entries
+  legitimately share one NCBI taxid while naming different database nodes (GTDB
+  polyphyly, NCBI subspecies), and `generate_mappings` wrote
+  `mappings[ncbi_taxid]`, so the three Bioshield *E. coli* variants left one
+  mapping and two database nodes resolved to no entry in
+  `_build_db_taxid_index`. The key now follows `_identity_key`, rides the record
+  as `TaxidMapping.entry_key` so a reload and a rescan reconstruct it, and the
+  slim browser store keys on it too.
+
+- **A custom watchlist entry is found however the report spells the name.** The
+  lookup was an exact lowercase compare, and the miss did not merely lose a
+  custom threshold: where the built-in database matched the row by substring,
+  the "not in the watchlist" branch suppressed the alert entirely. Resolution
+  goes through `TaxonomyMatcher` at the 0.7 floor, one pass over the rows.
+
+- **Three taxonomy state files are written atomically.** The taxid mapping
+  collection, the database index cache and the NCBI/GTDB taxonomy cache used
+  `open(path, "w")`, which truncates first; a truncated mappings file loads as
+  None and every entry then reads UNMAPPED -- a negative result produced by an
+  I/O accident, over a file that also holds the operator's manual
+  verifications.
+
+- **The report's decision banner respects each entry's `alert_threshold`.** It
+  alarmed on any detection, so one read of a critical entry rendered ACTION
+  REQUIRED where the dashboard renders MONITORING. A below-threshold detection
+  is still reported, as REVIEW RECOMMENDED.
+
+- **`NCBIClient.get_lineage` honours the per-host circuit breaker.** It issues
+  its own request (it needs XML) and consulted neither the breaker nor reported
+  to it, so with NCBI degraded every lineage call still paid the full timeout
+  after the breaker had opened, and its failures never counted towards opening
+  it. A response that arrives but does not parse is still not counted.
+
+- **`sample_name` is sent to the pipeline as a string.** A YAML
+  `sample_name: 7` loaded as an int and reached nanometanf's `InputDetector`,
+  which takes a String. The mapping coerces it; a digit-only name such as
+  `007` is sent verbatim (nanometanf 1.12.0dev accepts it, and keeps it).
+
+- Four places where the dashboard rendered less than it knew (field audit
+  2026-10-28, M1, M2, M3, M8). A loader exception during a run showed a
+  calm grey STANDBY; it is now the amber RESULTS UNREADABLE state with the
+  error named. The final execution trace is re-read after Nextflow exits,
+  so tasks that finished in the last poll window (the final aggregator, a
+  last isolated failure) are counted, and a clean exit without a single
+  task (a real-time timer that fired before any file arrived) reads
+  "Complete - no task ran" instead of PIPELINE ERROR. The backend polls
+  free space on the results volume every tick and the header and verdict
+  subtitle say so below the 5 GB floor, since a full disk ends a run
+  COMPLETE over truncated reports. And the first polls after boot stay at
+  the active cadence, so a dashboard opened on existing results shows them
+  within seconds rather than after the 60 s idle interval (79 s measured).
+- The field install is documented, pinned and checked. `nanometa_live_env.yml`
+  omitted six runtime requirements (dash-ag-grid, diskcache, psutil,
+  multiprocess, dill, openpyxl), so an environment built from it failed at
+  import and `pip install .` then reached PyPI, on a machine with no
+  network; the file now carries every requirement at the same floor, with
+  a test keeping it in step with `requirements.txt`. A Start into a new
+  results folder gave the get.nextflow.io launcher a fresh `NXF_HOME` with
+  no runtime jar, which it downloads and `NXF_OFFLINE` does not prevent;
+  the launch now seeds the per-run home from `~/.nextflow` and
+  `nanometa-prepare doctor` reports whether the runtime is cached. The
+  Operator Guide gained the install steps the bundle does not cover and a
+  pre-departure checklist ending with one real air-gapped run.
+- On-demand validation launches on a default install. The launcher placed
+  the configured `pipeline_source` in the command verbatim, so the default
+  `remote:dev` became `nextflow run remote:dev`, not a project name, and
+  every on-demand validation ended with "did not return a result". The
+  launch now goes through the same translation as Start Analysis
+  (`parse_pipeline_source`: repository plus `-r` revision, or a local
+  checkout); the test asserts the command line.
+- Start Analysis now refuses a run that fails a CRITICAL readiness check,
+  and names the rows. The checklist looked like a gate and was not one: the
+  header button's disabled attribute was the only barrier, the Preparation
+  tab's Start button proxied past it, and the Start callback never read
+  the readiness Store, so "Not Ready, 10/25 checks passed" sat above an
+  enabled Start Analysis button. The refusal is server-side on every click
+  (`readiness_blocks_start`); a readiness state never computed refuses too.
+  `start_without_readiness: true` in the configuration, or
+  `NANOMETA_ALLOW_NOT_READY=1`, starts anyway.
+- A pipeline that outlives the dashboard is no longer invisible. Nextflow
+  runs in its own session and survives a GUI crash; the lock recorded only
+  the GUI's PID, so the next launch called the lock stale and started a
+  second pipeline into the same results and work folders. The lock now
+  records the pipeline's PID once known, a launch into a folder whose
+  pipeline still lives is refused with that PID and how to stop it, a
+  startup toast names such a run, and the lock is opened without
+  truncating the holder's record (a second instance used to report an
+  empty "Lock info").
+- **The memory ceiling never rises above `--max_memory`.** `conf/base.config`
+  raises `resourceLimits.memory` to `kraken2_memory_gb` so an operator's
+  explicit PlusPFP size is honoured, and that also raised it above a
+  laptop's RAM when the request was sized from a database larger than the
+  machine (Nanometa Live sends `hash.k2d` + 4 GB); the local executor
+  refuses a request above physical memory and aborts the run. The ceiling
+  is now `min(max(16, kraken2_memory_gb), max_memory)`, and the three
+  Kraken2 processes clamp their no-mmap retry (`full * attempt`, which
+  asked for twice the RAM exactly when a segfault had made a retry
+  necessary) to the same param. The 128 GB default leaves every existing
+  invocation unchanged; Nanometa Live sends the host's own ceiling.
+  Verified in a stub run: a 29 GB request under `--max_memory 12.GB` is
+  traced at 12 GB.
+
+- A Kraken2 database larger than the laptop no longer aborts the run at its
+  first classifier task. The launch sized the request from `hash.k2d` and
+  nothing compared it to the machine; nanometanf raised its memory ceiling
+  to the request, and Nextflow's local executor refuses a request above
+  physical memory with a message the header did not recognise. The launch
+  now sends this machine's memory ceiling (`max_memory`, total minus 2 GB),
+  which nanometanf clamps to; the readiness checklist gained a "Database
+  Memory" row that is CRITICAL when the database cannot fit in memory and
+  WARNING when it fits only through the page cache; and the header names
+  the executor's refusal when it does happen.
+- A pre-warmed conda bundle no longer arrives with every byte-compiled
+  Python module corrupted. Import relocates the recorded build prefix with
+  a NUL-padded rewrite meant for C string tables, and a `.pyc` is marshal
+  data with length-prefixed strings: the bytes after the path shifted, the
+  module failed at first import with "bad marshal data", and relocation
+  reported zero failures. Conda byte-compiles every noarch package with the
+  env's absolute prefix, so every Python-based pipeline process (the
+  canonical writers, the Kraken2 merger and report generator, taxpasta,
+  multiqc, nanoplot) was dead on arrival on an air-gapped machine.
+  Relocation now removes a `.pyc` that carries the old prefix (Python
+  regenerates it from source) and counts the removals; the bundle-deploy
+  workflow gained a job that builds a real Python environment under a
+  padded prefix, moves it, relocates it and imports a byte-compiled module
+  with the relocated interpreter.
+- A finished batch run is no longer described as "still classifying". A
+  chunk whose reads the quality filter removes entirely never reaches the
+  classifier and gets no per-batch report, so the chunk plan was never
+  matched on disk and the verdict subtitle read "preliminary: 1 of 5
+  barcodes still classifying" under a COMPLETE badge, permanently. The
+  progress helper now reads the run's final status: a completed run counts
+  every planned barcode as complete, and a stopped or errored run says "not
+  fully classified" instead.
+- The "Validating Entries" modal no longer flashes on every page load. The
+  background validation worker took the per-row Validate buttons as its own
+  Inputs; rendering the table adds those buttons, which fires the callback,
+  and the worker's running clause opened the modal for the seconds the
+  worker process took to start before the body's guard could decline. A
+  main-process gate now admits only a genuine click and writes a request
+  Store the worker fires from.
 - Test datasets generated by `scripts/generate_test_datasets.py` now build a
   valid taxonomic hierarchy by construction, fixing the intermittent CI
   failures in `tests/test_visualization_integration.py::TestDataLoading`
@@ -32,6 +438,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   produced invalid indentation jumps for some random draws. Genus (`i//5`) now
   nests in family (`i//10`) nests in order (`i//20`), with a single consistent
   (phylum, class) pair per order.
+
+### Changed
+
+- The PyPI upload is off by default: the publish workflow builds the
+  distribution on every release and uploads only when the repository
+  variable `PUBLISH_TO_PYPI` is `true`. The user guide installs from the
+  GitHub release tag until the package is on PyPI.
 
 ## [0.19.0] - 2026-09-09
 

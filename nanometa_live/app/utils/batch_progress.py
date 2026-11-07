@@ -7,6 +7,15 @@ copies per batch: ``batch_N`` and ``<sample>_batchN``). Comparing the two says
 which barcodes are preliminary (some chunks done), complete (all done) or
 pending (none yet). A real-time run, or an older pipeline, writes no plan and
 gets no progress line.
+
+A chunk whose reads QC removes entirely never reaches the classifier:
+nanometanf routes the sample through ``EMIT_EMPTY_KRAKEN2_REPORT`` and writes
+no per-batch report for it, so the plan is never matched by the reports on
+disk. Mid-run that chunk is indistinguishable from one still classifying;
+once ``.nanometa.run.json`` records a completed run, it is not. The helper
+reads the run's terminal state so a finished run is never described as
+still classifying (observed 2026-09-16: a completed five-barcode run carried
+"preliminary: 1 of 5 barcodes still classifying" under a COMPLETE badge).
 """
 
 from __future__ import annotations
@@ -18,6 +27,21 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 _BATCH_ID_RE = re.compile(r"(?:^|_)batch_?(\d+)\.kraken2\.report\.txt$")
+
+_RUN_METADATA_FILENAME = ".nanometa.run.json"
+_TERMINAL_RUN_STATES = ("completed", "stopped", "error")
+
+
+def _run_state(results_dir: str) -> Optional[str]:
+    """The run's terminal state from its metadata, or None while it is not over."""
+    path = os.path.join(results_dir or "", _RUN_METADATA_FILENAME)
+    try:
+        with open(path) as fh:
+            meta = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    final = meta.get("final_status") if isinstance(meta, dict) else None
+    return final if final in _TERMINAL_RUN_STATES else None
 
 
 def read_chunk_plan(results_dir: str) -> Dict[str, int]:
@@ -55,17 +79,39 @@ def _done_batches(results_dir: str, sample: str) -> int:
 class BatchProgress:
     planned: Dict[str, int] = field(default_factory=dict)
     done: Dict[str, int] = field(default_factory=dict)
+    #: ``completed`` / ``stopped`` / ``error`` once the run is over, else None.
+    run_state: Optional[str] = None
+
+    @property
+    def finished(self) -> bool:
+        """The pipeline consumed every input and exited cleanly.
+
+        A planned chunk with no report on such a run yielded nothing to
+        classify (its reads were removed by QC); it is not still coming.
+        """
+        return self.run_state == "completed"
+
+    @property
+    def ended_early(self) -> bool:
+        """The run is over but did not finish: a stop or an error."""
+        return self.run_state in ("stopped", "error")
 
     @property
     def preliminary(self) -> List[str]:
+        if self.finished:
+            return []
         return sorted(s for s, n in self.planned.items() if 0 < self.done.get(s, 0) < n)
 
     @property
     def complete(self) -> List[str]:
+        if self.finished:
+            return sorted(self.planned)
         return sorted(s for s, n in self.planned.items() if self.done.get(s, 0) >= n)
 
     @property
     def pending(self) -> List[str]:
+        if self.finished:
+            return []
         return sorted(s for s in self.planned if self.done.get(s, 0) == 0)
 
     def summary_line(self) -> Optional[str]:
@@ -97,7 +143,8 @@ class BatchProgress:
         return f"Barcodes: {', '.join(parts)} of {total}"
 
 
-#: ``results_dir -> (plan mtime_ns, plan, per-sample dir mtimes, result)``.
+#: ``results_dir -> (plan mtime_ns, plan, (per-sample dir mtimes, run
+#: metadata mtime), result)``.
 #: Three callbacks (header, sample selector, verdict subtitle) ask for the
 #: same progress on every poll, and each ask cost one ``open`` plus one
 #: ``listdir`` per planned sample -- about 291 syscalls per tick at 96
@@ -126,11 +173,13 @@ def _mtime_ns(path: str) -> Optional[int]:
 
 
 def _batch_dir_key(results_dir: str, plan: Dict[str, int]) -> tuple:
-    """One stat per planned sample's ``batch_reports/`` directory."""
-    return tuple(
+    """One stat per planned sample's ``batch_reports/`` directory, plus one
+    for the run metadata (rewritten when the run reaches a terminal state)."""
+    dirs = tuple(
         (sample, _mtime_ns(os.path.join(results_dir, "kraken2", sample, "batch_reports")))
         for sample in sorted(plan)
     )
+    return (dirs, _mtime_ns(os.path.join(results_dir, _RUN_METADATA_FILENAME)))
 
 
 def batch_progress(results_dir: str) -> BatchProgress:
@@ -154,7 +203,8 @@ def batch_progress(results_dir: str) -> BatchProgress:
         dir_key = _batch_dir_key(root, plan)
 
     done = {s: _done_batches(root, s) for s in plan}
-    progress = BatchProgress(planned=plan, done=done)
+    progress = BatchProgress(planned=plan, done=done,
+                             run_state=_run_state(root) if plan else None)
     if root not in _progress_memo and len(_progress_memo) >= _PROGRESS_MEMO_MAX:
         _progress_memo.clear()
     _progress_memo[root] = (plan_mtime, plan, dir_key, progress)

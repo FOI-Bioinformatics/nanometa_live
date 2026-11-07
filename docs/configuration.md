@@ -161,6 +161,8 @@ says so.
 | `kraken2_memory_mapping` | bool | true | Share the Kraken2 DB across forks via OS page cache. |
 | `kraken2_task_memory_gb` | int | null | Per-task memory reservation for a Kraken2 fork under memory mapping, letting several forks run at once instead of serialising. `null` lets the GUI size it from the measured database: a floor of 4 GB when the database fits comfortably in the host's page cache, otherwise the full `kraken2_memory_gb` reservation (which serialises forks) is kept as the safer default. |
 | `max_classification_forks` | int | 4 | Max parallel Kraken2 jobs. Raise for high-RAM hosts; lower if OOM. |
+| `max_memory` | int or string | derived | Per-task memory ceiling sent to the pipeline. Left unset, the launch sends this machine's total memory minus 2 GB (floor 4 GB), so a Kraken2 request sized from a database larger than the machine is clamped rather than aborting the run. An integer is GB; a Nextflow memory string such as `48.GB` travels verbatim. |
+| `start_without_readiness` | bool | false | Start Analysis refuses a run while any CRITICAL readiness check fails (or readiness has not been computed), naming the rows. Set true to start anyway; `NANOMETA_ALLOW_NOT_READY=1` in the environment does the same. |
 | `report_write_interval` | int | 5 | Write progressive cumulative report every N batches (0 = every batch). |
 
 See the [Operator Guide section "Tuning for High-Throughput Runs"](OPERATOR_GUIDE.md#-tuning-for-high-throughput-runs-12-24-barcodes)
@@ -223,7 +225,7 @@ pathogens:
     threat_level: "high"             # critical, high, moderate, or low
     bsl_level: 2                     # Biosafety level (1-4)
     category: "BACTERIA"             # Grouping category (free text)
-    alert_threshold: 10              # Minimum reads before alerting
+    alert_threshold: 10              # Minimum reads before alerting (optional)
     action_required: "Steps to take" # Guidance text shown on detection
     notes: "Additional context"      # Background information
 ```
@@ -241,7 +243,7 @@ pathogens:
 | `threat_level` | yes | critical/high/moderate/low | Determines alert severity and color |
 | `bsl_level` | no | 1-4 | Biosafety level for handling guidance |
 | `category` | no | string | Grouping label (e.g., BACTERIA, VIRUSES, FUNGI) |
-| `alert_threshold` | no | int | Minimum read count to trigger an alert (default: 10) |
+| `alert_threshold` | no | int | Minimum read count to trigger an alert. When omitted it follows `threat_level`: critical 5, high 10, moderate 50, low 100 |
 | `action_required` | no | string | Operator guidance shown when organism is detected |
 | `notes` | no | string | Background information for the organism |
 

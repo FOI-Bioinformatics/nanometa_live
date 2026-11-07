@@ -1008,3 +1008,141 @@ class TestEmptyPlaceholderNeverDisplacesCumulative:
         (kd / "s1.cumulative.kraken2.report.txt").write_text(self.POPULATED)
         picked = _discover_sample_reports(str(kd), "s1")
         assert picked and picked[0].endswith("s1.kraken2.report.txt")
+
+
+class TestFingerprintTakenBeforeParse:
+    """A report rewritten between parse and store must not be cached stale.
+
+    ``_store_mtime_cache`` used to fingerprint the sample's files at store
+    time, AFTER the parse. A cumulative report rewritten inside that window
+    was therefore stored under its new fingerprint together with the frame
+    parsed from its old content, and every later lookup answered ``hit``
+    until the file changed again -- permanently when the rewrite was the
+    run's last (audit 2026-11-06, finding 11; reproduced with
+    scratchpad ``audit_loaders/t_toctou.py``: the file said 999, three
+    reloads returned 100). The fingerprint is now taken by the lookup
+    before any file is read and handed through to the store.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self):
+        from nanometa_live.core.utils import loader_utils
+        loader_utils.clear_all_loader_caches()
+        loader_utils._freshness_epoch = 0
+        yield
+        loader_utils.clear_all_loader_caches()
+
+    @staticmethod
+    def _write(report, n, back):
+        report.write_text(f"100.00\t{n}\t{n}\tR\t1\troot\n")
+        old = time.time() - back
+        os.utime(report, (old, old))
+
+    def test_rewrite_during_parse_is_seen_on_the_next_load(self, tmp_path, monkeypatch):
+        from nanometa_live.core.utils import classification_loaders as cl
+
+        kraken = tmp_path / "kraken2"
+        kraken.mkdir()
+        report = kraken / "barcode01.cumulative.kraken2.report.txt"
+        self._write(report, 100, back=5)
+
+        orig = cl._parse_kraken2_report
+        calls = {"n": 0}
+
+        def rewriting_parse(fp, check_stability=True):
+            df = orig(fp, check_stability)
+            if calls["n"] == 0:
+                # The pipeline rewrites the report while the loader is
+                # still inside its parse path; the new copy is already
+                # outside the stability window.
+                self._write(report, 999, back=3)
+            calls["n"] += 1
+            return df
+
+        monkeypatch.setattr(cl, "_parse_kraken2_report", rewriting_parse)
+        first = load_kraken_data(str(tmp_path), "barcode01")
+        monkeypatch.setattr(cl, "_parse_kraken2_report", orig)
+        assert int(first["cumul_reads"].iloc[0]) == 100, "precondition: parsed the old content"
+
+        second = load_kraken_data(str(tmp_path), "barcode01")
+        assert int(second["cumul_reads"].iloc[0]) == 999, (
+            "the frame parsed before the rewrite was cached under the "
+            "rewritten file's fingerprint and served as current"
+        )
+
+    def test_store_uses_the_fingerprint_it_is_given(self, tmp_path):
+        from nanometa_live.core.utils import loader_utils as lu
+
+        f = tmp_path / "a.txt"
+        f.write_text("x" * 100)
+        state, _, fp = lu._mtime_cache_lookup("k", [str(f)])
+        assert state == "absent" and fp is not None
+        f.write_text("y" * 200)   # changes size, so the fingerprint differs
+        lu._store_mtime_cache("k", [str(f)], "result", fingerprint=fp)
+        state2, _, _ = lu._mtime_cache_lookup("k", [str(f)])
+        assert state2 == "stale", (
+            "a store given the pre-parse fingerprint must not re-fingerprint "
+            "the changed file and mask the change"
+        )
+
+
+class TestLatestBatchUnreadableWinnerDoesNotFallThrough:
+    """A batch winner that cannot be read is unmeasured, not the standard report.
+
+    Audit 2026-11-06, 37: when batch candidates existed but the
+    highest-numbered one was inside its stability window (or corrupt),
+    ``load_kraken_latest_batch`` fell through to ``<sample>.kraken2.report.txt``
+    -- in the incremental layout the per-sample placeholder or the
+    whole-sample total -- and served that as the latest batch. The two are
+    different horizons; an empty frame says "nothing measured this poll" and
+    the next poll retries the batch.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self):
+        from nanometa_live.core.utils import loader_utils
+        loader_utils.clear_all_loader_caches()
+        loader_utils._freshness_epoch = 0
+        yield
+        loader_utils.clear_all_loader_caches()
+
+    def _tree(self, tmp_path):
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _build_incremental_layout(kraken_dir, "barcode01", batch_reads=[59])
+        young = kraken_dir / "barcode01" / "batch_reports" / "batch_1.kraken2.report.txt"
+        _write_batch_report(young, 18, 1639, "Listeria monocytogenes")
+        now = time.time()
+        os.utime(young, (now, now))          # inside the stability window
+        standard = kraken_dir / "barcode01.kraken2.report.txt"
+        _write_batch_report(standard, 999, 562, "Escherichia coli")
+        return young
+
+    def test_unreadable_winner_yields_empty_frame(self, tmp_path):
+        self._tree(tmp_path)
+        df = load_kraken_latest_batch(str(tmp_path), "barcode01")
+        assert df.empty, (
+            "the standard report (999 reads, a different horizon) was served "
+            "as the latest batch while the real winner was unreadable")
+
+    def test_winner_is_served_once_stable(self, tmp_path, monkeypatch):
+        self._tree(tmp_path)
+        assert load_kraken_latest_batch(str(tmp_path), "barcode01").empty
+        from nanometa_live.core.utils import loader_utils
+        real = time.time
+        monkeypatch.setattr(loader_utils.time, "time", lambda: real() + 5.0)
+        df = load_kraken_latest_batch(str(tmp_path), "barcode01")
+        assert int(df[df["taxid"] == 1].iloc[0]["cumul_reads"]) == 18
+
+    def test_memoized_unreadable_winner_yields_empty_frame(self, tmp_path):
+        # Second call hits the directory-state memo; same answer.
+        self._tree(tmp_path)
+        load_kraken_latest_batch(str(tmp_path), "barcode01")
+        assert load_kraken_latest_batch(str(tmp_path), "barcode01").empty
+
+    def test_no_batch_files_still_falls_back_to_standard(self, tmp_path):
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _write_batch_report(kraken_dir / "barcode01.kraken2.report.txt", 999, 562, "E")
+        df = load_kraken_latest_batch(str(tmp_path), "barcode01")
+        assert int(df[df["taxid"] == 1].iloc[0]["cumul_reads"]) == 999

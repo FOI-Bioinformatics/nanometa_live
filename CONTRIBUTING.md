@@ -55,7 +55,9 @@ pull requests.
    `chore(release): prepare X.Y.Z`.
 2. Open a pull request from `dev` to `main`; CI must be green.
 3. Merge, tag `X.Y.Z` (no `v` prefix), publish a GitHub release. The
-   publish workflow builds and uploads to PyPI.
+   publish workflow builds the distribution on every release; it uploads
+   to PyPI only when the repository variable `PUBLISH_TO_PYPI` is `true`
+   (off until the trusted publisher is registered).
 4. Update the bioconda recipe (version and sha256) in a pull request to
    bioconda-recipes.
 

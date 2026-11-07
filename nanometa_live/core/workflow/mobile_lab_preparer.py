@@ -227,7 +227,10 @@ class MobileLabPreparer:
         )
         db_path = self.config.get("kraken_db", "")
         db_hash = get_database_hash(db_path)
-        index_file = self.home / "mappings" / f"{db_hash}_index.pkl"
+        # TaxidMapper writes ``{db_hash}_index.json`` (and deletes a legacy
+        # pickle), so the pickle probe never found an index and skip_existing
+        # rebuilt on every preparation (audit 2026-11-06, finding 37).
+        index_file = self.home / "mappings" / f"{db_hash}_index.json"
 
         if skip_existing and index_file.exists():
             self._report(PrepStage.BUILD_INDEX, idx, "Index already exists", 100.0)

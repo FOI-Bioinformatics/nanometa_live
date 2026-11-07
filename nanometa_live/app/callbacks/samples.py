@@ -153,6 +153,9 @@ def _sample_state_badges(sample, dataless, progress):
                 f"preliminary {progress.done[sample]} of {progress.planned[sample]}",
                 color="info", className="ms-2",
                 title=(
+                    "The run ended before every chunk of this barcode "
+                    "was classified; the counts are partial."
+                    if progress.ended_early else
                     "More chunks of this barcode are still "
                     "classifying; the counts will grow."
                 ),

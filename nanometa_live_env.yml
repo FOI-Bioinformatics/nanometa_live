@@ -11,10 +11,22 @@ dependencies:
   - dash >=4.0.0
   - dash-daq >=0.6.0
   - dash-bootstrap-components >=1.7.1
+  # The remaining runtime requirements of requirements.txt. The dashboard
+  # imports dash-ag-grid at load and runs its background callbacks on
+  # diskcache + multiprocess + dill + psutil, so an environment built from
+  # this file alone used to fail at import and `pip install .` then reached
+  # PyPI -- on a field machine, with no network (field audit 2026-10-28,
+  # H6). tests/test_env_yml_covers_requirements.py keeps the two in step.
+  - dash-ag-grid >=31.0.0
+  - diskcache >=5.6.0
+  - psutil >=6.0.0
+  - multiprocess >=0.70.0
+  - dill >=0.3.0
+  - openpyxl >=3.1.0
   - plotly >=6.0.0
   - numpy >=2.0.0
   - pandas >=2.2.3
-  - pyyaml >=6.0
+  - pyyaml >=6.0.1
   - pytest >=7.2.1
   - tqdm >=4.67.1
   - setuptools >=67.6.0
