@@ -189,7 +189,11 @@ class WatchlistEntry:
     name: str  # Primary scientific name
     common_name: Optional[str] = None
     threat_level: ThreatLevel = ThreatLevel.MODERATE
-    alert_threshold: int = 10
+    # None means "not stated"; __post_init__ derives it from threat_level via
+    # default_alert_threshold, the table from_dict already used. A flat 10 on
+    # the field made a directly constructed critical entry half as sensitive
+    # as the same entry loaded from YAML.
+    alert_threshold: Optional[int] = None
     bsl_level: Optional[BiosaftyLevel] = None
     category: Optional[str] = None
     notes: str = ""
@@ -222,6 +226,10 @@ class WatchlistEntry:
     api_commonname: Optional[str] = None
     api_rank: Optional[str] = None
     gtdb_taxonomy: Optional[str] = None  # Full GTDB taxonomy string
+
+    def __post_init__(self):
+        if self.alert_threshold is None:
+            self.alert_threshold = default_alert_threshold(self.threat_level)
 
     @classmethod
     def from_pathogen_entry(cls, pathogen: PathogenEntry) -> "WatchlistEntry":

@@ -225,7 +225,7 @@ pathogens:
     threat_level: "high"             # critical, high, moderate, or low
     bsl_level: 2                     # Biosafety level (1-4)
     category: "BACTERIA"             # Grouping category (free text)
-    alert_threshold: 10              # Minimum reads before alerting
+    alert_threshold: 10              # Minimum reads before alerting (optional)
     action_required: "Steps to take" # Guidance text shown on detection
     notes: "Additional context"      # Background information
 ```
@@ -243,7 +243,7 @@ pathogens:
 | `threat_level` | yes | critical/high/moderate/low | Determines alert severity and color |
 | `bsl_level` | no | 1-4 | Biosafety level for handling guidance |
 | `category` | no | string | Grouping label (e.g., BACTERIA, VIRUSES, FUNGI) |
-| `alert_threshold` | no | int | Minimum read count to trigger an alert (default: 10) |
+| `alert_threshold` | no | int | Minimum read count to trigger an alert. When omitted it follows `threat_level`: critical 5, high 10, moderate 50, low 100 |
 | `action_required` | no | string | Operator guidance shown when organism is detected |
 | `notes` | no | string | Background information for the organism |
 
