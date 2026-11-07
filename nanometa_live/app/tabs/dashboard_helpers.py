@@ -1370,9 +1370,34 @@ def _calculate_overall_status(
         "total_reads": total_reads,
         "quality_score": quality_score,
         "organisms_detected": organisms_detected,
-        "active_alerts": 0,  # Calculated later in _generate_alerts
         "samples_processed": samples_processed,
         "total_samples": total_samples
+    }
+
+
+def run_status_for_alerts(backend_status: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The run-state keys ``_generate_alerts`` reads, from the backend status.
+
+    ``_generate_alerts`` took these keys from the overall-status dict, which
+    ``_calculate_overall_status`` never wrote, so the engine saw a run that
+    was never running, never completed, had no errors and no files: its
+    completion alert and its error alert could not fire (bug audit
+    2026-11-06, item 37). ``compute_overall_status_cache`` now merges this
+    dict into the cache from the backend status it already holds.
+
+    Translates the BackendManager status names (``files_processed``,
+    ``files_waiting``, the ``errors`` list) to the alert engine's
+    (``processed_files``, ``pending_files``, ``error_count``) and carries
+    ``running`` / ``completed`` through. Every value is a plain bool or int,
+    so the result can ride the ``dashboard-overall-status-cache`` Store.
+    """
+    status = backend_status or {}
+    return {
+        "running": bool(status.get("running", False)),
+        "completed": bool(status.get("completed", False)),
+        "error_count": len(status.get("errors") or []),
+        "pending_files": int(status.get("files_waiting") or 0),
+        "processed_files": int(status.get("files_processed") or 0),
     }
 
 

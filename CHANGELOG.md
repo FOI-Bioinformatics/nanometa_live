@@ -28,6 +28,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A mid-run Apply Settings survives the next tick.**
+  `hydrate_app_config_from_live_run` copied the live config (what the
+  pipeline was launched with; Apply never changes it) over every tab's
+  `app-config` on every poll while a run existed, so a
+  `negative_control_samples`, `min_reads_for_validation` or
+  `update_interval_seconds` applied mid-run was reverted within one poll
+  while the toast promised it took effect now (bug audit 2026-11-06,
+  finding 13). A tab that already carries the run's results dir has been
+  hydrated and now receives only the running-run path keys
+  (`RUNNING_RUN_PATH_KEYS`, the set `pin_running_run_paths` holds on
+  Apply); a tab without it, or holding another folder, still receives the
+  live config wholesale.
+
+- **The alert engine receives the run's real state.** `_generate_alerts`
+  read `running`, `completed`, `error_count`, `pending_files` and
+  `processed_files` off the overall-status dict, which nothing wrote, so
+  the completion, error and backlog alerts could never fire (bug audit
+  2026-11-06, item 37). `compute_overall_status_cache` now merges
+  `run_status_for_alerts(backend_status)` into the cache, translating the
+  backend's `files_processed` / `files_waiting` / `errors` to the engine's
+  names. The dead `active_alerts` key, "calculated later" by nothing, is
+  gone.
 - **A launch that failed before Popen no longer stays "running"** (audit
   2026-11-06, finding 6; 198 of 200 launches on the reproduction).
   `NextflowManager.start` sets the running flags before it spawns the
