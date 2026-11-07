@@ -320,7 +320,7 @@ class TestBuildIndexAndMappings:
             "nanometa_live.core.taxonomy.taxid_mapping.TaxidMapper", _Boom
         )
         prep = make_preparer(tmp_path, config={"kraken_db": "/db"})
-        index_file = tmp_path / "mappings" / "abc_index.pkl"
+        index_file = tmp_path / "mappings" / "abc_index.json"
         index_file.parent.mkdir(parents=True)
         index_file.write_text("cached")
         prep._run_build_index(1, PreparationResult(success=True), True)  # no raise

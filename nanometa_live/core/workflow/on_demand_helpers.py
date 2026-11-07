@@ -149,6 +149,22 @@ def _genome_file_looks_valid(path: Path) -> bool:
         return False
 
 
+def resource_ceiling_args(config: Optional[Dict[str, Any]]) -> List[str]:
+    """``--max_cpus`` / ``--max_memory`` for the on-demand command line.
+
+    Resolved by ``parameter_mapping.resource_ceiling_params``, the resolver
+    the main launch uses, so both runs are clamped to the same machine.
+    Without them BLAST and minimap2 requested ``8.GB * attempt`` under the
+    pipeline's 16 GB default ceiling and an 8 GB laptop aborted where the
+    main run had been clamped (audit 2026-11-06, finding 32).
+    """
+    from nanometa_live.core.config.parameter_mapping import resource_ceiling_params
+    args: List[str] = []
+    for key, value in resource_ceiling_params(config or {}).items():
+        args.extend([f"--{key}", str(value)])
+    return args
+
+
 def _validation_timeout_seconds(config: Optional[Dict[str, Any]]) -> int:
     """Resolve the subprocess timeout (seconds) from config, floored at 60s."""
     minutes = (config or {}).get(

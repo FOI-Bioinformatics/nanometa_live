@@ -50,6 +50,213 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   backend's `files_processed` / `files_waiting` / `errors` to the engine's
   names. The dead `active_alerts` key, "calculated later" by nothing, is
   gone.
+- **A launch that failed before Popen no longer stays "running"** (audit
+  2026-11-06, finding 6; 198 of 200 launches on the reproduction).
+  `NextflowManager.start` sets the running flags before it spawns the
+  launch thread, so a thread that fails at once (unwritable log, offline
+  mode with a missing conda cache) has the last word; the monitor then
+  records PIPELINE ERROR with the launcher's own message instead of
+  showing SCREENING until an operator Stop labelled the run stopped.
+- **A Stop pressed after Nextflow exited keeps the run's real outcome**
+  (finding 8). `BackendManager.stop` asks the workflow manager first and,
+  when the pipeline is already gone, classifies through the same terminal
+  path the monitor uses -- a completed run stays completed and no
+  `stop_reason: operator` is written. A Stop that fails while the pipeline
+  may still be alive keeps the lock and the running state.
+- **The finished run's monitor thread no longer releases the next run's
+  lock** (finding 12). The lock is released under the status lock before
+  the monitor's final sleep, every release carries the lock generation the
+  thread started with, the loop exits when a newer run begins, and
+  `start()` joins a live previous monitor briefly. Companion: a refused
+  `_acquire_lock` no longer adopts the holder's lock path, and
+  `_record_final_status` writes where `write_run_metadata` wrote.
+- **A PID another user owns is alive, not stale.** `_process_exists`
+  returned False on `PermissionError`, calling another operator's live lock
+  stale (finding 27).
+- **The Nextflow report, timeline and trace exist on a GUI run** (finding
+  23). `-with-trace`/`-with-report`/`-with-timeline` replace nanometanf's
+  `pipeline_info/` targets rather than copying them, and all three pointed
+  at `<data_dir>/logs/`, so the Reports tab's three Nextflow entries were
+  always absent and the export never carried them. The launcher now names
+  the trace `<outdir>/pipeline_info/execution_trace_<ts>.txt` (the status
+  poller reads that path) and sends no report/timeline flag; the pipeline's
+  config writes both.
+- **Archive moves `realtime_stats/`, `realtime_reports/`, `chopper/`,
+  `filtlong/` and `assembly/`** (finding 24). Left behind, a previous
+  real-time run's throughput figures stood on the Reports tab for a whole
+  batch run.
+- **On-demand validation launches under the machine's ceilings** (finding
+  32): the command carries `--max_memory` and `--max_cpus` from the same
+  resolver the main launch uses (`resource_ceiling_params`). BLAST and
+  minimap2 asked `8.GB * attempt` under the pipeline's 16 GB default, so an
+  8 GB laptop aborted where the main run had been clamped.
+- **On-demand results are written atomically and read back under the key
+  they were written with** (finding 35). `_save_results` claimed
+  write-then-rename and did a plain write; it wrote `percent_validated`
+  where `load_validation_result` read `validation_rate`, so a reloaded
+  result carried 0.0.
+- **The GUI reads the incremental classifier's per-read output** (finding
+  4, GUI side). `ReadExtractor` resolves
+  `kraken2/<sample>.cumulative.kraken2.output.txt`, else every
+  `kraken2/<sample>/batches/batch_N.kraken2.output.txt`, before the flat
+  standard-branch names it alone looked for; `parameter_mapping` sends
+  `save_reads_assignment` / `save_output_fastqs` when the config sets them,
+  not only when watchlist validation runs. The pipeline half (publishing
+  the classified FASTQ and a flat per-read output in incremental mode) is
+  nanometanf WP2a; CLAUDE.md states what the pipeline publishes today.
+- **Compatibility floor is nanometanf 1.12.0** (finding 28): the first
+  version that accepts the digit-only `sample_name`, the single-taxid
+  `taxids_to_validate` and the schema-validated `--validation_only` the GUI
+  sends. A `1.12.0dev` checkout passes as the development pre-release of
+  the floor; 1.11.0 is refused by name.
+- **Three probes looked at the wrong thing** (finding 37): the readiness
+  "Input Directory" check counts top-level `*.fq*` beside `*.fastq*`;
+  `_check_db_index` and `mobile_lab_preparer` probed a `{db_hash}_index.pkl`
+  that `TaxidMapper` deletes and rebuilds (the preparer's skip-existing
+  never skipped; the readiness row passed on a pickle-only install), both
+  now probe the `_index.json` the mapper writes.
+- **The validation parser re-probes its layout on every read** (audit
+  2026-11-06, finding 7). The shared `ValidationParser` chose between
+  `blast_validation/`, `validation/blast/`, `validation/` and `blast/` once,
+  at construction. With `validation_method: both` minimap2 finishes first,
+  so the parser built on the first poll pinned `validation/`, and every
+  `blast.tsv` published later into `validation/blast/` was outside its glob:
+  the BLAST sub-tab stayed empty for the life of the process while a fresh
+  parser found the result. The layout is now probed at the start of each
+  read (four `exists` calls; a changed answer drops the results cache), and
+  nanometanf's `validation/blast/` is globbed for TSVs and their stats
+  sidecars even when a legacy top-level directory resolves first.
+
+- **A stability-window skip is transient in every loader, not only the
+  Kraken2 ones** (finding 10). The validation parser, the three fastp
+  loaders and the seqkit batch loader skipped a file younger than one
+  second and then cached the reduced result under a fingerprint that
+  already included that file. The window closes by time passing, which
+  changes no mtime, so the file stayed out of the totals until something
+  else changed under the directory: in batch mode the last fastp JSON
+  written was missing from the QC totals, in real time a BLAST pair caught
+  mid-rewrite disappeared. `loader_utils.StabilitySkips` records the skip
+  and the store is withheld on that call, the `transient_skip` rule the
+  Kraken2 loaders already followed.
+
+- **The mtime-cache fingerprint is taken before the parse, not after**
+  (finding 11). `_store_mtime_cache` fingerprinted the sample's files at
+  store time; a cumulative report rewritten between parse and store was
+  cached under its new fingerprint with the frame parsed from the old
+  content and served as `hit` until the next rewrite -- permanently when
+  the rewrite was the run's last (the file said 999, three reloads returned
+  100). `_mtime_cache_lookup` returns the fingerprint that decided the
+  miss, and `load_kraken_data`, the fastp/nanoplot/seqkit loaders and
+  `load_blast_validation_data` store under it. No extra filesystem walk:
+  the store no longer computes one.
+
+- **The on-disk BLAST fallback divides by the clade** (finding 22).
+  `load_blast_validation_data`'s `blast.tsv` fallback took the per-rank
+  `reads` column as its denominator while the pipeline validates the clade
+  (`KreportTree.cladeOf`); on the documented *F. tularensis* report (3,406
+  direct / 9,602 clade) the rate read 282%. It now uses `cumul_reads`
+  (falling back to `reads`), clamps the rate to 100, and keys its cache
+  entry on the sample's Kraken2 reports as well as `validation/`, so a
+  report that advances is not served with the old rate.
+
+- Four cache-hygiene items from the same audit (37): `_file_mapping_cache`
+  is cleared by `invalidate_sample_cache` (the inventory listed it as
+  cleared at a run boundary while nothing cleared it, so a new run into the
+  same outdir could be answered with the previous run's file mapping); the
+  staleness scope is the parent of the LAST `kraken2` path component, so a
+  results tree under a directory itself named `kraken2` is flagged under
+  the right scope; `paf_breadth`'s cache is read, evicted and written under
+  a lock (two callback threads scanned and inserted concurrently); and
+  `load_kraken_latest_batch` returns an empty frame when the batch winner
+  exists but cannot be read this poll instead of falling through to the
+  standard report, which is a different horizon (the incremental layout's
+  placeholder or whole-sample total).
+- **Fuzzy name matching no longer binds a watchlist entry to a congener.**
+  `FuzzyMatchStrategy` scored the whole name at 0.85, and its candidates all
+  share a genus, so `burkholderia mallei` against `burkholderia pseudomallei`
+  scored 0.864 and was accepted -- a melioidosis sample raised a glanders
+  (Tier 1) alert under the wrong organism's name, with no ambiguity
+  disclosure. The species epithets are now compared on their own at the same
+  threshold: a typo inside one epithet still matches, a GTDB polyphyly suffix
+  is not a difference, and a genus- or family-level entry is not gated.
+
+- **The exported report screens the watchlist through the taxid mapping and
+  the matcher.** `_match_entry_rows` compared `db_taxid or taxid` against the
+  frame's taxid column and fell back to an exact lowercase name compare, so on
+  a GTDB/flextaxd database *Bacillus anthracis* (NCBI 1392) against the row
+  `Bacillus_A anthracis` (4005020) matched nothing: every entry read
+  `detected=False` and the report printed the green "NO WATCHED ORGANISMS
+  DETECTED" for a run the dashboard alarmed on. Row resolution moved to
+  `core/export/watchlist_screen.py`, which adds the mapping collection's
+  `db_taxid` and routes the name fallback through `TaxonomyMatcher` at the 0.7
+  alert floor; the collection is loaded from `{db_hash}_mappings.json` when the
+  export runs in a worker with no singleton.
+
+- **A bare trinomial watchlist entry resolves to its subspecies node.**
+  `parse_binomial` set the subspecies only for the explicit `subsp.` spelling,
+  so *Francisella tularensis holarctica* generated only species-level variants
+  and landed on the parent species wherever the database writes `subsp.` --
+  collapsing Type A and Type B onto one match. A trinomial's third word is now
+  the subspecies epithet (rank words, serovar codes and strain numbers
+  excluded) and the `subsp.` form is generated ahead of the species fallback.
+
+- **A watchlist override lands on the entry it names.** `_apply_override`
+  indexed `_entries[taxid]` while a fork entry -- same NCBI taxid, different
+  `db_taxid` -- is stored under its own key, so an override for one of the
+  Bioshield *E. coli* variants moved another organism's threshold. It resolves
+  through `resolve_entry_key`, and each exported override record now carries
+  `db_taxid` and `name` so a session round trip can identify its entry.
+
+- **A config naming a missing watchlist without `enabled` is reported.**
+  `unresolved_watchlist_ids` defaulted the block's `enabled` to False where the
+  loader defaults it True, so such a config loaded zero entries while the
+  CRITICAL "Watchlist Files" row and the startup toast stayed silent.
+
+- **The validation launch parameters fall back to `default_config()`.**
+  `_validation_params` carried its own literals and two diverged:
+  `validation_method` fell back to `blast` against a default of `minimap2`, and
+  `e_val_cutoff` to `1e-10` against `0.01`. Invisible for a config read from
+  disk, decisive for one built in code -- confirmation testing then ran a
+  method the operator never chose at an e-value two orders of magnitude
+  stricter.
+
+- **The report's "Top Organisms" sorts on clade reads.** It sorted on the
+  per-rank `reads` column while displaying Kraken2's clade `%`, so
+  *F. tularensis* at 60% of a run ranked below *E. coli* at 2% and could fall
+  off the end of the table.
+
+- **A taxid mapping is keyed by entry identity.** Several watchlist entries
+  legitimately share one NCBI taxid while naming different database nodes (GTDB
+  polyphyly, NCBI subspecies), and `generate_mappings` wrote
+  `mappings[ncbi_taxid]`, so the three Bioshield *E. coli* variants left one
+  mapping and two database nodes resolved to no entry in
+  `_build_db_taxid_index`. The key now follows `_identity_key`, rides the record
+  as `TaxidMapping.entry_key` so a reload and a rescan reconstruct it, and the
+  slim browser store keys on it too.
+
+- **A custom watchlist entry is found however the report spells the name.** The
+  lookup was an exact lowercase compare, and the miss did not merely lose a
+  custom threshold: where the built-in database matched the row by substring,
+  the "not in the watchlist" branch suppressed the alert entirely. Resolution
+  goes through `TaxonomyMatcher` at the 0.7 floor, one pass over the rows.
+
+- **Three taxonomy state files are written atomically.** The taxid mapping
+  collection, the database index cache and the NCBI/GTDB taxonomy cache used
+  `open(path, "w")`, which truncates first; a truncated mappings file loads as
+  None and every entry then reads UNMAPPED -- a negative result produced by an
+  I/O accident, over a file that also holds the operator's manual
+  verifications.
+
+- **The report's decision banner respects each entry's `alert_threshold`.** It
+  alarmed on any detection, so one read of a critical entry rendered ACTION
+  REQUIRED where the dashboard renders MONITORING. A below-threshold detection
+  is still reported, as REVIEW RECOMMENDED.
+
+- **`NCBIClient.get_lineage` honours the per-host circuit breaker.** It issues
+  its own request (it needs XML) and consulted neither the breaker nor reported
+  to it, so with NCBI degraded every lineage call still paid the full timeout
+  after the breaker had opened, and its failures never counted towards opening
+  it. A response that arrives but does not parse is still not counted.
 
 - **`sample_name` is sent to the pipeline as a string.** A YAML
   `sample_name: 7` loaded as an int and reached nanometanf's `InputDetector`,
