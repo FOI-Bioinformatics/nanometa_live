@@ -28,6 +28,63 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The validation parser re-probes its layout on every read** (audit
+  2026-11-06, finding 7). The shared `ValidationParser` chose between
+  `blast_validation/`, `validation/blast/`, `validation/` and `blast/` once,
+  at construction. With `validation_method: both` minimap2 finishes first,
+  so the parser built on the first poll pinned `validation/`, and every
+  `blast.tsv` published later into `validation/blast/` was outside its glob:
+  the BLAST sub-tab stayed empty for the life of the process while a fresh
+  parser found the result. The layout is now probed at the start of each
+  read (four `exists` calls; a changed answer drops the results cache), and
+  nanometanf's `validation/blast/` is globbed for TSVs and their stats
+  sidecars even when a legacy top-level directory resolves first.
+
+- **A stability-window skip is transient in every loader, not only the
+  Kraken2 ones** (finding 10). The validation parser, the three fastp
+  loaders and the seqkit batch loader skipped a file younger than one
+  second and then cached the reduced result under a fingerprint that
+  already included that file. The window closes by time passing, which
+  changes no mtime, so the file stayed out of the totals until something
+  else changed under the directory: in batch mode the last fastp JSON
+  written was missing from the QC totals, in real time a BLAST pair caught
+  mid-rewrite disappeared. `loader_utils.StabilitySkips` records the skip
+  and the store is withheld on that call, the `transient_skip` rule the
+  Kraken2 loaders already followed.
+
+- **The mtime-cache fingerprint is taken before the parse, not after**
+  (finding 11). `_store_mtime_cache` fingerprinted the sample's files at
+  store time; a cumulative report rewritten between parse and store was
+  cached under its new fingerprint with the frame parsed from the old
+  content and served as `hit` until the next rewrite -- permanently when
+  the rewrite was the run's last (the file said 999, three reloads returned
+  100). `_mtime_cache_lookup` returns the fingerprint that decided the
+  miss, and `load_kraken_data`, the fastp/nanoplot/seqkit loaders and
+  `load_blast_validation_data` store under it. No extra filesystem walk:
+  the store no longer computes one.
+
+- **The on-disk BLAST fallback divides by the clade** (finding 22).
+  `load_blast_validation_data`'s `blast.tsv` fallback took the per-rank
+  `reads` column as its denominator while the pipeline validates the clade
+  (`KreportTree.cladeOf`); on the documented *F. tularensis* report (3,406
+  direct / 9,602 clade) the rate read 282%. It now uses `cumul_reads`
+  (falling back to `reads`), clamps the rate to 100, and keys its cache
+  entry on the sample's Kraken2 reports as well as `validation/`, so a
+  report that advances is not served with the old rate.
+
+- Four cache-hygiene items from the same audit (37): `_file_mapping_cache`
+  is cleared by `invalidate_sample_cache` (the inventory listed it as
+  cleared at a run boundary while nothing cleared it, so a new run into the
+  same outdir could be answered with the previous run's file mapping); the
+  staleness scope is the parent of the LAST `kraken2` path component, so a
+  results tree under a directory itself named `kraken2` is flagged under
+  the right scope; `paf_breadth`'s cache is read, evicted and written under
+  a lock (two callback threads scanned and inserted concurrently); and
+  `load_kraken_latest_batch` returns an empty frame when the batch winner
+  exists but cannot be read this poll instead of falling through to the
+  standard report, which is a different horizon (the incremental layout's
+  placeholder or whole-sample total).
+
 - **`sample_name` is sent to the pipeline as a string.** A YAML
   `sample_name: 7` loaded as an int and reached nanometanf's `InputDetector`,
   which takes a String. The mapping coerces it; a digit-only name such as
