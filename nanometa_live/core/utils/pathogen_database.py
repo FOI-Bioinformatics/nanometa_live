@@ -184,6 +184,25 @@ def _database_taxids_are_ncbi() -> bool:
         return False
 
 
+def _database_generates_gtdb_variants() -> bool:
+    """Whether to index entries' speculative GTDB genus-suffix forms.
+
+    True for a GTDB or undetectable database, so a custom NCBI watchlist
+    name reaches a grafted GTDB report name on a mapping-less build; False
+    on an NCBI database where the suffixes are absent. No profile yet:
+    generate, matching the unknown-nomenclature default. Mirrors
+    WatchlistManager._database_generates_gtdb_variants.
+    """
+    try:
+        from nanometa_live.core.taxonomy.taxid_mapping import (
+            get_mapping_collection,
+        )
+        collection = get_mapping_collection()
+        return bool(collection and collection.profile.generates_gtdb_variants)
+    except (ImportError, AttributeError):
+        return True
+
+
 # (organisms digest, custom digest) -> detections. The alert engine calls
 # check_for_dangerous_pathogens with identical inputs on every tick; the
 # merged-db build is cached below, but the O(M x |db|) matching loop still
@@ -260,7 +279,8 @@ def _custom_name_resolver(
         ]
         if not shims:
             return {}
-        index = matcher.build_entry_index(shims)
+        index = matcher.build_entry_index(
+            shims, generates_gtdb_variants=_database_generates_gtdb_variants())
         resolved: Dict[str, Dict[str, Any]] = {}
         for organism in detected_organisms:
             name = (organism.get("name") or "").lower().strip()

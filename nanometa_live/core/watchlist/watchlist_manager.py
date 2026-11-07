@@ -549,7 +549,7 @@ class WatchlistManager:
         # (watchlist_signature, EntryMatchIndex) built lazily by
         # _entry_match_index. Content-keyed, so every mutation invalidates
         # by construction -- there is no bump hook to forget.
-        self._match_index_cache: Optional[Tuple[str, Any]] = None
+        self._match_index_cache: Optional[Tuple[Tuple[str, bool], Any]] = None
 
     def load_config(self, config: Dict[str, Any]) -> None:
         """
@@ -1048,6 +1048,29 @@ class WatchlistManager:
             return False
 
     @staticmethod
+    def _database_generates_gtdb_variants() -> bool:
+        """Whether to index the entries' speculative GTDB genus-suffix forms.
+
+        True for a GTDB database and for one whose nomenclature cannot be
+        established -- the same ``DatabaseProfile.generates_gtdb_variants``
+        rule the taxid-mapping strategies use. On a mapping-less GTDB
+        database this is the only bridge from an NCBI watchlist name to the
+        report's grafted GTDB name; False (NCBI, or no profile yet) keeps the
+        index cheap, since the suffixes are provably absent there.
+        """
+        try:
+            from nanometa_live.core.taxonomy.taxid_mapping import (
+                get_mapping_collection,
+            )
+            collection = get_mapping_collection()
+            return bool(collection and collection.profile.generates_gtdb_variants)
+        except (ImportError, AttributeError):
+            # No profile yet: match the live detection default of generating
+            # variants when nomenclature is unknown, so a GTDB report is not
+            # silently missed before the database is indexed.
+            return True
+
+    @staticmethod
     def _other_entries_on_node(
         detected_taxid: Optional[int],
         db_to_ncbi: Dict[int, List[int]],
@@ -1200,12 +1223,13 @@ class WatchlistManager:
         former inner loop recomputed name variants for every
         (row x entry) pair.
         """
-        signature = self.watchlist_signature(active_entries)
+        gtdb = self._database_generates_gtdb_variants()
+        signature = (self.watchlist_signature(active_entries), gtdb)
         cached = self._match_index_cache
         if cached is not None and cached[0] == signature:
             return cached[1]
         index = _get_taxonomy_matcher().build_entry_index(
-            list(active_entries.values()))
+            list(active_entries.values()), generates_gtdb_variants=gtdb)
         self._match_index_cache = (signature, index)
         return index
 

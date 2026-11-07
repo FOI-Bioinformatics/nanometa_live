@@ -104,6 +104,18 @@ class EntryRowResolver:
         self._entries: List[Any] = [e for e in entries if e is not None]
         self._ids: Dict[int, Set[int]] = {}
         self._names: Dict[int, Set[str]] = {}
+        # Generate the entries' speculative GTDB genus-suffix forms for name
+        # matching when the loaded database is GTDB or undetectable, so an
+        # NCBI watchlist name reaches a grafted GTDB report name
+        # (``Bacillus anthracis`` -> ``Bacillus_A anthracis``) with no taxid
+        # mapping, exactly as the live dashboard pass does. No profile (no
+        # mapping collection): generate, matching the unknown-nomenclature
+        # default rather than silently missing a GTDB report.
+        profile = getattr(mapping_collection, "profile", None)
+        self._gtdb = bool(
+            getattr(profile, "generates_gtdb_variants", True)
+            if profile is not None else True
+        )
         self._build_ids(mapping_collection)
         self._build_names(frames)
 
@@ -153,7 +165,8 @@ class EntryRowResolver:
             get_taxonomy_matcher,
         )
         matcher = get_taxonomy_matcher()
-        index = matcher.build_entry_index(self._entries)
+        index = matcher.build_entry_index(
+            self._entries, generates_gtdb_variants=self._gtdb)
         for name in names:
             entry, score = matcher.match_row_indexed(name, index)
             if entry is not None and score >= NAME_MATCH_FLOOR:
