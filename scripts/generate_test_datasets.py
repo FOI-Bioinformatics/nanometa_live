@@ -62,6 +62,30 @@ EXTENDED_ORGANISM_DB = [
 ]
 
 
+# Taxids for the intermediate ranks (D/P/C/O/F/G) must be stable, unique, and
+# must never collide with a species taxid or with each other. The earlier code
+# used ``hash(name) % 90000 + 1000``, but CPython randomises str hashing per
+# process (PYTHONHASHSEED), so across CI runs two intermediate nodes could land
+# on the same taxid. The loader aggregates rows by taxid ("All Samples" path),
+# so a collision silently drops one of the colliding intermediate rows — a
+# species then follows its family directly and the hierarchy validator rightly
+# flags an indentation jump (e.g. "10 -> 14 at Enterococcus faecalis"). Assign
+# ids from a reserved high block instead, keyed by (rank, name), so the tree is
+# valid by construction regardless of PYTHONHASHSEED or the random species draw.
+_INTERMEDIATE_TAXID_BASE = 1_000_000
+_intermediate_taxids: Dict[Tuple[str, str], int] = {}
+
+
+def _rank_taxid(rank: str, name: str) -> int:
+    """Return a stable, unique, collision-free taxid for an intermediate rank node."""
+    key = (rank, name)
+    taxid = _intermediate_taxids.get(key)
+    if taxid is None:
+        taxid = _INTERMEDIATE_TAXID_BASE + len(_intermediate_taxids)
+        _intermediate_taxids[key] = taxid
+    return taxid
+
+
 def generate_kraken_report(species_list: List[Dict], total_reads: int, unclassified_pct: float = 0.15) -> List[str]:
     """
     Generate Kraken2 report with proper hierarchical indentation.
@@ -126,23 +150,23 @@ def generate_kraken_report(species_list: List[Dict], total_reads: int, unclassif
     # Group by phylum, class, order, family, genus
     for phylum in sorted(set(s["phylum"] for s in species_list)):
         phylum_species = [s for s in species_list if s["phylum"] == phylum]
-        lines.append(f"{(phylum_reads[phylum]/total_reads)*100:.2f}\t{phylum_reads[phylum]}\t0\tP\t{hash(phylum) % 90000 + 1000}\t    {phylum}")
+        lines.append(f"{(phylum_reads[phylum]/total_reads)*100:.2f}\t{phylum_reads[phylum]}\t0\tP\t{_rank_taxid('P', phylum)}\t    {phylum}")
 
         for class_name in sorted(set(s["class"] for s in phylum_species)):
             class_species = [s for s in phylum_species if s["class"] == class_name]
-            lines.append(f"{(class_reads[class_name]/total_reads)*100:.2f}\t{class_reads[class_name]}\t0\tC\t{hash(class_name) % 90000 + 1000}\t      {class_name}")
+            lines.append(f"{(class_reads[class_name]/total_reads)*100:.2f}\t{class_reads[class_name]}\t0\tC\t{_rank_taxid('C', class_name)}\t      {class_name}")
 
             for order in sorted(set(s["order"] for s in class_species)):
                 order_species = [s for s in class_species if s["order"] == order]
-                lines.append(f"{(order_reads[order]/total_reads)*100:.2f}\t{order_reads[order]}\t0\tO\t{hash(order) % 90000 + 1000}\t        {order}")
+                lines.append(f"{(order_reads[order]/total_reads)*100:.2f}\t{order_reads[order]}\t0\tO\t{_rank_taxid('O', order)}\t        {order}")
 
                 for family in sorted(set(s["family"] for s in order_species)):
                     family_species = [s for s in order_species if s["family"] == family]
-                    lines.append(f"{(family_reads[family]/total_reads)*100:.2f}\t{family_reads[family]}\t0\tF\t{hash(family) % 90000 + 1000}\t          {family}")
+                    lines.append(f"{(family_reads[family]/total_reads)*100:.2f}\t{family_reads[family]}\t0\tF\t{_rank_taxid('F', family)}\t          {family}")
 
                     for genus in sorted(set(s["genus"] for s in family_species)):
                         genus_species = [s for s in family_species if s["genus"] == genus]
-                        lines.append(f"{(genus_reads[genus]/total_reads)*100:.2f}\t{genus_reads[genus]}\t0\tG\t{hash(genus) % 90000 + 1000}\t            {genus}")
+                        lines.append(f"{(genus_reads[genus]/total_reads)*100:.2f}\t{genus_reads[genus]}\t0\tG\t{_rank_taxid('G', genus)}\t            {genus}")
 
                         for species in genus_species:
                             reads = species_reads[species["taxid"]]
