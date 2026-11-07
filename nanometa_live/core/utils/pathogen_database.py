@@ -227,6 +227,53 @@ def check_for_dangerous_pathogens(
     return [dict(d) for d in cached]
 
 
+def _custom_name_resolver(
+    custom_watchlist: Optional[List[Dict[str, Any]]],
+    detected_organisms: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """Map each detected name to the custom entry it denotes, or nothing.
+
+    One pass with ``TaxonomyMatcher``'s entry index, so the cost is
+    O(rows + entries) rather than the product, and the rule is the one the
+    WatchlistManager pass applies: best match wins, first entry wins ties,
+    nothing below the 0.7 alert floor. Returns an empty map when there is no
+    custom watchlist, so the caller's exact-name lookup is unchanged.
+    """
+    if not custom_watchlist:
+        return {}
+    try:
+        from types import SimpleNamespace
+
+        from nanometa_live.core.watchlist.taxonomy_matcher import (
+            get_taxonomy_matcher,
+        )
+        matcher = get_taxonomy_matcher()
+        shims = [
+            SimpleNamespace(
+                name=item.get("name", "") or "",
+                names_alt=item.get("names_alt") or [],
+                _item=item,
+            )
+            for item in custom_watchlist
+            if item.get("name")
+        ]
+        if not shims:
+            return {}
+        index = matcher.build_entry_index(shims)
+        resolved: Dict[str, Dict[str, Any]] = {}
+        for organism in detected_organisms:
+            name = (organism.get("name") or "").lower().strip()
+            if not name or name in resolved:
+                continue
+            shim, score = matcher.match_row_indexed(name, index)
+            if shim is not None and score >= 0.7:
+                resolved[name] = shim._item
+        return resolved
+    except Exception as exc:  # matching must never break alerting
+        logger.debug("Custom watchlist name resolution failed: %s", exc)
+        return {}
+
+
 def _check_for_dangerous_pathogens_uncached(
     detected_organisms: List[Dict[str, Any]],
     custom_watchlist: Optional[List[Dict[str, Any]]] = None,
@@ -277,6 +324,18 @@ def _check_for_dangerous_pathogens_uncached(
             if name:
                 custom_lookup[name] = item
 
+    # The name half of that lookup is an exact lowercase compare, so a
+    # detected name spelled differently from the watchlist entry -- a GTDB
+    # polyphyly suffix, an underscore spelling, a strain suffix -- found
+    # nothing. That was not merely a missed custom threshold: where the
+    # built-in database DID match the row by substring, the
+    # "watchlist exists but this pathogen is not in it" branch below SKIPPED
+    # the alert entirely, so a differently spelled name suppressed the
+    # detection (audit 2026-11-06, finding 33). The resolver below answers
+    # the same question through TaxonomyMatcher, the matcher the dashboard's
+    # own watchlist pass uses, at its 0.7 floor.
+    custom_by_name = _custom_name_resolver(custom_watchlist, detected_organisms)
+
     db_is_ncbi = _database_taxids_are_ncbi()
 
     for organism in detected_organisms:
@@ -312,6 +371,7 @@ def _check_for_dangerous_pathogens_uncached(
         custom_entry = (
             (custom_lookup.get(taxid) if db_is_ncbi else None)
             or custom_lookup.get(name)
+            or custom_by_name.get(name)
         )
 
         # If pathogen is in custom watchlist, respect its enabled status

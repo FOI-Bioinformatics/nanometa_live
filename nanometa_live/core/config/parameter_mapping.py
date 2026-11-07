@@ -32,6 +32,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 
+from nanometa_live.core.config.config_loader import default_config
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 from nanometa_live.core.utils.genome_manager import get_genome_manager
 
@@ -899,26 +900,40 @@ def _validation_params(config: Dict[str, Any], run_validation_enabled: bool,
     producing a false negative. The pipeline's per-batch gate stays at its
     safe default of 1, results-identical to extracting every taxid.
     """
+    # Every fallback below must equal default_config(): load_config merges the
+    # defaults on read, so a divergent literal here only surfaces for a config
+    # built in code or one predating the key -- and then it silently changes
+    # the run. validation_method fell back to "blast" against a default of
+    # "minimap2" (a 5-10x slower method the operator did not choose) and
+    # e_val_cutoff to 1e-10 against 0.01, two orders of magnitude stricter,
+    # which drops true hits from confirmation testing (audit 2026-11-06,
+    # finding 20).
+    defaults = default_config()
     return {
         "run_validation": run_validation_enabled,
-        "validation_method": config.get("validation_method", "blast"),
-        "blast_evalue": _coerce_blast_evalue(config.get("e_val_cutoff", 1e-10)),
+        "validation_method": config.get(
+            "validation_method", defaults["validation_method"]),
+        "blast_evalue": _coerce_blast_evalue(
+            config.get("e_val_cutoff", defaults["e_val_cutoff"])),
         "blast_perc_identity": int(round(float(
             config.get("validation_identity_threshold", 90)
         ))),
-        "validation_hit_rate_threshold": config.get("validation_hit_rate_threshold", 0.5),
-        "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
+        "validation_hit_rate_threshold": config.get(
+            "validation_hit_rate_threshold",
+            defaults["validation_hit_rate_threshold"]),
+        "validation_identity_threshold": config.get(
+            "validation_identity_threshold",
+            defaults["validation_identity_threshold"]),
         "minimap2_preset": _coerce_minimap2_preset(config.get("minimap2_preset")),
-        # Fallback must match create_default_config (30). A divergent default
-        # (10) silently filtered more permissively for any config missing
-        # the key -- programmatic configs and files predating the field.
-        "minimap2_min_mapq": config.get("minimap2_min_mapq", 30),
+        "minimap2_min_mapq": config.get(
+            "minimap2_min_mapq", defaults["minimap2_min_mapq"]),
         # Consensus sequence generation (amplicon-focused). Off unless the
         # operator enables it; only meaningful when validation runs.
         "generate_consensus": (
             config.get("generate_consensus", False) and run_validation_enabled
         ),
-        "consensus_min_depth": config.get("consensus_min_depth", 10),
+        "consensus_min_depth": config.get(
+            "consensus_min_depth", defaults.get("consensus_min_depth", 10)),
         # Legacy parameter (deprecated; nanometanf maps to run_validation)
         "blast_validation": blast_validation_enabled,
     }

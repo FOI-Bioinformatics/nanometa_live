@@ -379,6 +379,9 @@ class FuzzyMatchStrategy(MatchStrategy):
             if not node or not is_species_rank(node.rank):
                 continue
 
+            if not self._epithet_compatible(query, node.name_normalized):
+                continue
+
             similarity = self._calculate_similarity(
                 query.canonical,
                 node.name_normalized
@@ -412,6 +415,57 @@ class FuzzyMatchStrategy(MatchStrategy):
         if not s1 or not s2:
             return 0.0
         return SequenceMatcher(None, s1, s2).ratio()
+
+    @staticmethod
+    def _bare_epithet(epithet: str) -> str:
+        """The epithet without a GTDB polyphyly suffix (``coli_d`` -> ``coli``).
+
+        GTDB suffixes a split species alphabetically, so the suffix carries no
+        information about which organism the name denotes and must not count
+        as a spelling difference here.
+        """
+        base = epithet.strip().lower()
+        if "_" in base:
+            head, _, tail = base.rpartition("_")
+            if head and tail.isalpha() and len(tail) <= 2:
+                return head
+        return base
+
+    def _epithet_compatible(
+        self, query: NormalizedName, candidate_name: str
+    ) -> bool:
+        """Whether a fuzzy candidate may stand for the SAME species epithet.
+
+        A whole-name ratio is dominated by the genus, which both names share
+        by construction (candidates come from a genus-prefix search). So
+        ``burkholderia mallei`` against ``burkholderia pseudomallei`` scored
+        0.864 -- over the 0.85 threshold -- and a melioidosis sample raised a
+        glanders (Tier 1) alert under the wrong organism's name, with no
+        ambiguity disclosure (audit 2026-11-06, finding 1). Fuzzy runs only
+        when exact and variant matching have failed, i.e. exactly when a
+        minimized field database has pruned the real species, so the wrong
+        congener is the LIKELY outcome rather than a corner case.
+
+        The epithets are therefore compared on their own at the same
+        threshold: a typo inside one epithet still matches
+        (``anthracsi``/``anthracis``, 0.889) while a different epithet does
+        not (``mallei``/``pseudomallei``, 0.667). The gate is skipped when
+        either side has no epithet to compare -- a genus- or family-level
+        entry is deliberately broad, and refusing it here would narrow
+        matching rather than correct it.
+        """
+        if not query.species_epithet:
+            return True
+        parts = (candidate_name or "").strip().lower().split()
+        if len(parts) < 2:
+            return True
+        query_epithet = self._bare_epithet(query.species_epithet)
+        candidate_epithet = self._bare_epithet(parts[1])
+        if query_epithet == candidate_epithet:
+            return True
+        return self._calculate_similarity(
+            query_epithet, candidate_epithet
+        ) >= self.threshold
 
 
 class ParentTaxonStrategy(MatchStrategy):
