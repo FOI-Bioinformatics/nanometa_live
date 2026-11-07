@@ -6,6 +6,7 @@ nf-schema message naming a parameter (SWOT 2026-09-04, weakness 2).
 
 import pytest
 
+from nanometa_live.core.workflow.pipeline_compat import NANOMETANF_MIN_VERSION
 from nanometa_live.core.workflow.readiness_checker import ReadinessChecker, Severity
 
 pytestmark = pytest.mark.unit
@@ -33,11 +34,11 @@ class TestPipelineVersionCheck:
         assert result.name == "Pipeline Version"
         assert result.passed is False
         assert result.severity == Severity.CRITICAL
-        assert "1.4.1dev" in result.message and "1.11.0" in result.message
+        assert "1.4.1dev" in result.message and NANOMETANF_MIN_VERSION in result.message
 
     def test_at_floor_is_info_pass(self, tmp_path):
         result = ReadinessChecker()._check_pipeline_version(
-            {"pipeline_source": _checkout(tmp_path, "1.11.0")}
+            {"pipeline_source": _checkout(tmp_path, NANOMETANF_MIN_VERSION)}
         )
         assert result.passed is True
         assert result.severity == Severity.INFO
@@ -54,7 +55,7 @@ class TestPipelineVersionCheck:
     # tests/test_readiness_offline_checks.py::TestChecksAreWired).
     def test_report_carries_the_check_when_a_source_is_set(self, tmp_path):
         config = {
-            "pipeline_source": _checkout(tmp_path, "1.11.0"),
+            "pipeline_source": _checkout(tmp_path, NANOMETANF_MIN_VERSION),
             "kraken_db": "",
             "offline_mode": True,
             "pipeline_profile": "conda",
