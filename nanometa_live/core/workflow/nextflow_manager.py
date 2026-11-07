@@ -131,6 +131,9 @@ class NextflowManager:
         # missing-column header only once each, not on every poll.
         self._trace_unknown_statuses: set = set()
         self._trace_header_warned = False
+        # This run's execution trace: start() points it at the run's
+        # pipeline_info/ (see _run_trace_path); the data-dir default is the fallback.
+        self.trace_path = self._default_trace_path()
 
         # Status dictionary matching SnakemakeManager interface
         self.status = {
@@ -689,15 +692,23 @@ class NextflowManager:
                 if revision:
                     cmd.extend(["-r", revision])
 
-                # Add common flags
+                # Add common flags. The trace is the status poller's source,
+                # so the GUI names its path -- but under the run's own
+                # pipeline_info/, where nanometanf's config puts the report,
+                # the timeline and (when nobody overrides it) the trace. The
+                # old flags moved all three into the data dir's logs/: a
+                # CLI flag replaces the config's target, it does not copy it,
+                # so the Reports tab's three Nextflow entries never existed
+                # on a GUI run and the export never carried them (audit
+                # 2026-11-06, finding 23). -with-report / -with-timeline are
+                # not sent at all: the pipeline's config writes them.
+                self.trace_path = self._run_trace_path()
                 cmd.extend([
                     "-params-file", self.params_file_path,
                     "-c", self.config_file_path,
                     "-profile", profile,
                     "-work-dir", self.work_dir,
-                    "-with-trace", os.path.join(self.log_dir, "trace.txt"),
-                    "-with-report", os.path.join(self.log_dir, "report.html"),
-                    "-with-timeline", os.path.join(self.log_dir, "timeline.html")
+                    "-with-trace", self.trace_path,
                 ])
 
                 if resume:
@@ -1059,6 +1070,43 @@ class NextflowManager:
             self.status["last_updated"] = time.time()
             logging.info("Nextflow workflow execution finished")
 
+    def _default_trace_path(self) -> str:
+        """The fixed data-dir trace path, used when no run outdir is known."""
+        return os.path.join(self.log_dir, "trace.txt")
+
+    def _params_outdir(self) -> Optional[str]:
+        """The ``outdir`` the written params file sends, or None."""
+        if not self.params_file_path:
+            return None
+        try:
+            with open(self.params_file_path, "r") as f:
+                return json.load(f).get("outdir") or None
+        except (OSError, ValueError, AttributeError):
+            return None
+
+    def _run_trace_path(self) -> str:
+        """This launch's trace file: ``<outdir>/pipeline_info/execution_trace_<ts>.txt``.
+
+        The name follows nanometanf's own ``trace_report_suffix`` convention
+        so the Reports tab's ``pipeline_info/execution_trace*.txt`` glob and
+        the export's pipeline_info copy pick it up. Each run gets its own
+        file, so the stale-trace problem ``reset_run_artifacts`` guards
+        against on the fixed path cannot arise here. Falls back to the
+        data-dir path when the params carry no outdir or the directory
+        cannot be created.
+        """
+        outdir = self._params_outdir()
+        if not outdir:
+            return self._default_trace_path()
+        info_dir = os.path.join(outdir, "pipeline_info")
+        try:
+            os.makedirs(info_dir, exist_ok=True)
+        except OSError as exc:
+            logging.warning("Could not create %s for the trace: %s", info_dir, exc)
+            return self._default_trace_path()
+        stamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+        return os.path.join(info_dir, f"execution_trace_{stamp}.txt")
+
     def reset_run_artifacts(self) -> None:
         """Clear the previous run's trace and status counters.
 
@@ -1072,12 +1120,16 @@ class NextflowManager:
         output-collision bleeds: a fresh run must never present an earlier
         run's result as its own.
         """
-        trace_path = os.path.join(self.log_dir, "trace.txt")
+        # A run under pipeline_info/ has a timestamped trace of its own and
+        # leaves the previous run's in place as a result artifact; only the
+        # fixed data-dir path can serve a stale trace and is cleared.
+        trace_path = self._default_trace_path()
         try:
             if os.path.exists(trace_path):
                 os.remove(trace_path)
         except OSError as exc:
             logging.warning("Could not clear the previous trace file: %s", exc)
+        self.trace_path = trace_path
 
         self._last_trace_status = {}
         self.status.update({
@@ -1102,7 +1154,7 @@ class NextflowManager:
         Polls every 5 seconds while running.
         """
         logging.info("Nextflow trace monitor started")
-        trace_path = os.path.join(self.log_dir, "trace.txt")
+        trace_path = self.trace_path
 
         while self.running and self.process:
             try:
@@ -1153,7 +1205,7 @@ class NextflowManager:
         Returns:
             Dictionary with process counts and stage-level information
         """
-        trace_path = os.path.join(self.log_dir, "trace.txt")
+        trace_path = self.trace_path
 
         try:
             if not os.path.exists(trace_path):

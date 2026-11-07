@@ -579,6 +579,16 @@ class BackendManager:
         # it; leaving it behind would show run A's verdict on the Reports
         # tab during run B.
         "report",
+        # REALTIME_STATISTICS output (cumulative_stats.json, alerts.json):
+        # the Reports tab's throughput panel reads it, so a previous
+        # real-time run's figures stood for a whole batch run (audit
+        # 2026-11-06, finding 24). The read-filter outputs, the assembly
+        # tree and the real-time reports are results of the run too.
+        "realtime_stats",
+        "realtime_reports",
+        "chopper",
+        "filtlong",
+        "assembly",
     )
 
     @staticmethod
