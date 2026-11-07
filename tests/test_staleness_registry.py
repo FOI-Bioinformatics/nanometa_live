@@ -202,3 +202,40 @@ class TestScopeNormalization:
                                           when=time.time() - 999)
         assert staleness.stale_sample_count(str(link),
                                             grace_seconds=0) == 1
+
+
+class TestScopeIsTheResultsTree:
+    """The scope is the parent of the LAST ``kraken2`` path component.
+
+    Audit 2026-11-06, 37: ``_record_staleness`` split the report path and
+    took the FIRST ``kraken2`` component, so a results tree that lives under
+    a directory itself named ``kraken2`` (``/data/kraken2/run/kraken2/...``)
+    was recorded under ``/data``, and the banner's query for the real
+    results dir never saw the flag.
+    """
+
+    def test_results_dir_under_a_kraken2_parent(self, tmp_path):
+        import os
+        from nanometa_live.core.utils import classification_loaders as cl
+        from nanometa_live.core.utils import loader_utils
+        loader_utils.clear_all_loader_caches()
+        loader_utils._freshness_epoch = 0
+        staleness.clear()
+
+        results_dir = tmp_path / "kraken2" / "run"
+        report = results_dir / "kraken2" / "barcode01.kraken2.report.txt"
+        report.parent.mkdir(parents=True)
+        report.write_text("100.00\t100\t10\tR\t1\troot\n 10.00\t10\t10\tS\t100\tSpecies x\n")
+        back = time.time() - 120
+        os.utime(report, (back, back))
+        assert not cl.load_kraken_data(str(results_dir), "barcode01").empty
+
+        report.write_text("garbage\tnot\ta\treport")
+        os.utime(report, (back + 1, back + 1))
+        cl.load_kraken_data(str(results_dir), "barcode01")
+        assert staleness.stale_sample_count(str(results_dir), grace_seconds=0) == 1, (
+            "the fallback was recorded under the first 'kraken2' component, "
+            "not the results tree")
+        assert staleness.stale_sample_count(str(tmp_path), grace_seconds=0) == 0
+        staleness.clear()
+        loader_utils.clear_all_loader_caches()

@@ -93,8 +93,11 @@ def load_blast_validation_data(
     part of the key, so a watchlist edit can never be served from the
     previous entry. Returns per-call copies -- callers annotate the dicts.
     """
+    from nanometa_live.core.utils.classification_loaders import (
+        _sample_fingerprint_paths,
+    )
     from nanometa_live.core.utils.loader_utils import (
-        _check_mtime_cache, _store_mtime_cache,
+        _mtime_cache_lookup, _store_mtime_cache,
     )
 
     main_dir = resolve_analysis_directory(main_dir)
@@ -103,13 +106,39 @@ def load_blast_validation_data(
         if s.get("taxid") is not None and str(s["taxid"]).lstrip("-").isdigit()
     )))
     cache_key = f"blastval:{main_dir}:{sample}:{taxid_digest}"
+    # The on-disk fallback's denominator is the sample's Kraken2 clade count,
+    # so the entry depends on that sample's reports too: a report that
+    # advances with no validation change must not serve the old rate
+    # (finding 22). Sample-scoped, like the Kraken2 loader's own key.
     fingerprint_paths = [os.path.join(main_dir, "validation")]
-    cached = _check_mtime_cache(cache_key, fingerprint_paths)
-    if cached is not None:
+    fingerprint_paths.extend(
+        _sample_fingerprint_paths(os.path.join(main_dir, "kraken2"), sample))
+    state, cached, fingerprint = _mtime_cache_lookup(cache_key, fingerprint_paths)
+    if state == "hit":
         return {tid: dict(entry) for tid, entry in cached.items()}
     result = _load_blast_validation_data_uncached(main_dir, watchlist, sample)
-    _store_mtime_cache(cache_key, fingerprint_paths, result)
+    _store_mtime_cache(cache_key, fingerprint_paths, result, fingerprint=fingerprint)
     return {tid: dict(entry) for tid, entry in result.items()}
+
+
+def _clade_reads(row) -> int:
+    """A taxon's clade read count: ``cumul_reads``, else ``reads``.
+
+    The pipeline validates the clade (``KreportTree.cladeOf``), so the
+    denominator must be the clade too. The per-rank ``reads`` column is what
+    was assigned directly at the node; on the documented *F. tularensis*
+    report it is 3,406 against a clade of 9,602, and dividing the clade's
+    validated reads by it gave 282% (audit 2026-11-06, finding 22).
+    """
+    for col in ("cumul_reads", "reads"):
+        if col in row.index:
+            try:
+                value = row[col]
+            except (KeyError, IndexError):
+                continue
+            if value is not None and value == value:  # not NaN
+                return int(value)
+    return 0
 
 
 def _load_blast_validation_data_uncached(
@@ -330,11 +359,13 @@ def _load_blast_validation_data_uncached(
         if not kraken_df.empty:
             species_row = kraken_df[kraken_df['taxid'] == taxid]
             if not species_row.empty:
-                total_reads = int(species_row.iloc[0]['reads'])
+                total_reads = _clade_reads(species_row.iloc[0])
 
-        # Calculate validation rate
+        # Calculate validation rate. Clamped: a read set extracted from a
+        # superset of the denominator (an older report, a wider clade) must
+        # never read as more than fully validated.
         if total_reads > 0:
-            validation_rate = (validated_count / total_reads) * 100
+            validation_rate = min((validated_count / total_reads) * 100, 100.0)
         else:
             validation_rate = 0.0
 
