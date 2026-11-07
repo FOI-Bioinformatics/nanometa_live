@@ -506,19 +506,81 @@ def _mtime_cache_state(
     return ("stale", None)
 
 
+def _mtime_cache_lookup(
+    cache_key: str,
+    paths: List[str],
+) -> Tuple[str, Any, Optional[Tuple[float, int, int]]]:
+    """``_mtime_cache_state`` plus the fingerprint that decided a miss.
+
+    The third element is the fingerprint of ``paths`` taken at lookup time,
+    or ``None`` on an epoch hit (no filesystem call was made). A caller that
+    goes on to parse must store under THIS fingerprint, never one taken after
+    the parse: ``_store_mtime_cache`` used to fingerprint at store time, so a
+    report rewritten between parse and store was cached under the NEW
+    fingerprint and served as ``hit`` until the file changed again --
+    permanently when it was the run's final rewrite (audit 2026-11-06,
+    finding 11). Taking the fingerprint here costs nothing extra: the store
+    no longer walks the paths.
+    """
+    with _cache_lock:
+        entry = _file_mtimes.get(cache_key)
+        epoch = _freshness_epoch
+    if entry is not None:
+        stored_fp, stored_epoch, cached_result = entry
+        if epoch and stored_epoch == epoch:
+            return ("hit", cached_result, None)
+    current_fp = _get_path_fingerprint(paths)
+    if entry is not None and current_fp == stored_fp:
+        with _cache_lock:
+            _file_mtimes[cache_key] = (stored_fp, epoch, cached_result)
+        return ("hit", cached_result, current_fp)
+    return ("absent" if entry is None else "stale", None, current_fp)
+
+
 def _store_mtime_cache(
     cache_key: str,
     paths: List[str],
     result: Any,
+    fingerprint: Optional[Tuple[float, int, int]] = None,
 ) -> None:
     """Store a result keyed by the (mtime, size, count) fingerprint of paths.
 
     The current freshness epoch is recorded alongside so that repeat lookups
     within the same poll can skip the fingerprint walk entirely.
+
+    ``fingerprint`` is the value ``_mtime_cache_lookup`` returned BEFORE the
+    caller parsed; pass it whenever the lookup computed one. Fingerprinting
+    here, after the parse, is the window finding 11 describes.
     """
-    fp = _get_path_fingerprint(paths)
+    fp = fingerprint if fingerprint is not None else _get_path_fingerprint(paths)
     with _cache_lock:
         _file_mtimes[cache_key] = (fp, _freshness_epoch, result)
+
+
+class StabilitySkips:
+    """Records whether a loader skipped a file inside its stability window.
+
+    A skip heals by time passing, which changes no mtime and therefore no
+    fingerprint, so a result built with one is transient and must not enter
+    the mtime cache -- the ``transient_skip`` rule the Kraken2 loaders follow
+    (round-4 audit, H6). Shared here so the validation, fastp and seqkit
+    loaders apply the same rule: each used to store the reduced result under
+    a fingerprint that already included the skipped file, which then stayed
+    out of the totals until something else changed under the directory
+    (audit 2026-11-06, finding 10).
+    """
+
+    __slots__ = ("skipped",)
+
+    def __init__(self) -> None:
+        self.skipped = False
+
+    def is_stable(self, filepath: str) -> bool:
+        """``_is_file_stable``, remembering a False answer."""
+        if _is_file_stable(filepath):
+            return True
+        self.skipped = True
+        return False
 
 
 def check_data_freshness(main_dir: str) -> str:

@@ -162,6 +162,7 @@ def reset_caches() -> None:
 
     with sd._sample_cache_lock:
         sd._sample_cache.clear()
+        sd._file_mapping_cache.clear()
 
     # Optional caches -- present in some versions of the loader stack.
     for module, name in ((lu, "_poll_fingerprint_cache"),

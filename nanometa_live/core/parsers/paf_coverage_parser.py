@@ -7,6 +7,7 @@ for visualization in the validation tab.
 """
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -224,8 +225,12 @@ def aggregate_contig_coverage(
 # taxid) on every poll. Merging intervals gives the same breadth and a local
 # depth in O(n log n) with no big allocation.
 
-#: Cached on (realpath, mtime_ns, size, min_mapq).
+#: Cached on (realpath, mtime_ns, size, min_mapq). Guarded by the lock
+#: below: the verdict path and the validation tab both call paf_breadth from
+#: different callback threads, and the eviction scan iterates the dict while
+#: another thread may insert (audit 2026-11-06, 37).
 _breadth_cache: Dict[tuple, "PafBreadth"] = {}
+_breadth_cache_lock = threading.Lock()
 
 
 @dataclass
@@ -266,16 +271,17 @@ def paf_breadth(paf_path, min_mapq: int = 0) -> Optional["PafBreadth"]:
     except OSError:
         return None
     key = (str(path), st.st_mtime_ns, st.st_size, min_mapq)
-    cached = _breadth_cache.get(key)
-    if cached is not None:
-        return cached
-    # Round 3: PAFs are rewritten in place every realtime batch, so each
-    # rewrite minted a fresh key and the old ones lived forever -- the
-    # cache grew monotonically with pairs x batches (~135 MB after 200
-    # batches). Evict this file's superseded versions before caching.
-    for stale in [k for k in _breadth_cache
-                  if k[0] == key[0] and k[3] == min_mapq and k != key]:
-        _breadth_cache.pop(stale, None)
+    with _breadth_cache_lock:
+        cached = _breadth_cache.get(key)
+        if cached is not None:
+            return cached
+        # Round 3: PAFs are rewritten in place every realtime batch, so each
+        # rewrite minted a fresh key and the old ones lived forever -- the
+        # cache grew monotonically with pairs x batches (~135 MB after 200
+        # batches). Evict this file's superseded versions before caching.
+        for stale in [k for k in _breadth_cache
+                      if k[0] == key[0] and k[3] == min_mapq and k != key]:
+            _breadth_cache.pop(stale, None)
 
     intervals: List[tuple] = []
     ref_len = 0
@@ -313,5 +319,6 @@ def paf_breadth(paf_path, min_mapq: int = 0) -> Optional["PafBreadth"]:
     covered += cur_end - cur_start
 
     result = PafBreadth(ref_length=ref_len, covered_bp=covered, aligned_bp=aligned)
-    _breadth_cache[key] = result
+    with _breadth_cache_lock:
+        _breadth_cache[key] = result
     return result
