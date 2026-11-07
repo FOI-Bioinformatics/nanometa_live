@@ -28,6 +28,72 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A launch that failed before Popen no longer stays "running"** (audit
+  2026-11-06, finding 6; 198 of 200 launches on the reproduction).
+  `NextflowManager.start` sets the running flags before it spawns the
+  launch thread, so a thread that fails at once (unwritable log, offline
+  mode with a missing conda cache) has the last word; the monitor then
+  records PIPELINE ERROR with the launcher's own message instead of
+  showing SCREENING until an operator Stop labelled the run stopped.
+- **A Stop pressed after Nextflow exited keeps the run's real outcome**
+  (finding 8). `BackendManager.stop` asks the workflow manager first and,
+  when the pipeline is already gone, classifies through the same terminal
+  path the monitor uses -- a completed run stays completed and no
+  `stop_reason: operator` is written. A Stop that fails while the pipeline
+  may still be alive keeps the lock and the running state.
+- **The finished run's monitor thread no longer releases the next run's
+  lock** (finding 12). The lock is released under the status lock before
+  the monitor's final sleep, every release carries the lock generation the
+  thread started with, the loop exits when a newer run begins, and
+  `start()` joins a live previous monitor briefly. Companion: a refused
+  `_acquire_lock` no longer adopts the holder's lock path, and
+  `_record_final_status` writes where `write_run_metadata` wrote.
+- **A PID another user owns is alive, not stale.** `_process_exists`
+  returned False on `PermissionError`, calling another operator's live lock
+  stale (finding 27).
+- **The Nextflow report, timeline and trace exist on a GUI run** (finding
+  23). `-with-trace`/`-with-report`/`-with-timeline` replace nanometanf's
+  `pipeline_info/` targets rather than copying them, and all three pointed
+  at `<data_dir>/logs/`, so the Reports tab's three Nextflow entries were
+  always absent and the export never carried them. The launcher now names
+  the trace `<outdir>/pipeline_info/execution_trace_<ts>.txt` (the status
+  poller reads that path) and sends no report/timeline flag; the pipeline's
+  config writes both.
+- **Archive moves `realtime_stats/`, `realtime_reports/`, `chopper/`,
+  `filtlong/` and `assembly/`** (finding 24). Left behind, a previous
+  real-time run's throughput figures stood on the Reports tab for a whole
+  batch run.
+- **On-demand validation launches under the machine's ceilings** (finding
+  32): the command carries `--max_memory` and `--max_cpus` from the same
+  resolver the main launch uses (`resource_ceiling_params`). BLAST and
+  minimap2 asked `8.GB * attempt` under the pipeline's 16 GB default, so an
+  8 GB laptop aborted where the main run had been clamped.
+- **On-demand results are written atomically and read back under the key
+  they were written with** (finding 35). `_save_results` claimed
+  write-then-rename and did a plain write; it wrote `percent_validated`
+  where `load_validation_result` read `validation_rate`, so a reloaded
+  result carried 0.0.
+- **The GUI reads the incremental classifier's per-read output** (finding
+  4, GUI side). `ReadExtractor` resolves
+  `kraken2/<sample>.cumulative.kraken2.output.txt`, else every
+  `kraken2/<sample>/batches/batch_N.kraken2.output.txt`, before the flat
+  standard-branch names it alone looked for; `parameter_mapping` sends
+  `save_reads_assignment` / `save_output_fastqs` when the config sets them,
+  not only when watchlist validation runs. The pipeline half (publishing
+  the classified FASTQ and a flat per-read output in incremental mode) is
+  nanometanf WP2a; CLAUDE.md states what the pipeline publishes today.
+- **Compatibility floor is nanometanf 1.12.0** (finding 28): the first
+  version that accepts the digit-only `sample_name`, the single-taxid
+  `taxids_to_validate` and the schema-validated `--validation_only` the GUI
+  sends. A `1.12.0dev` checkout passes as the development pre-release of
+  the floor; 1.11.0 is refused by name.
+- **Three probes looked at the wrong thing** (finding 37): the readiness
+  "Input Directory" check counts top-level `*.fq*` beside `*.fastq*`;
+  `_check_db_index` and `mobile_lab_preparer` probed a `{db_hash}_index.pkl`
+  that `TaxidMapper` deletes and rebuilds (the preparer's skip-existing
+  never skipped; the readiness row passed on a pickle-only install), both
+  now probe the `_index.json` the mapper writes.
+
 - **`sample_name` is sent to the pipeline as a string.** A YAML
   `sample_name: 7` loaded as an int and reached nanometanf's `InputDetector`,
   which takes a String. The mapping coerces it; a digit-only name such as
