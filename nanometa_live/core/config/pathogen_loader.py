@@ -92,10 +92,18 @@ class PathogenEntry:
     bsl: Optional[BiosaftyLevel] = None
     category: Optional[str] = None  # CDC Category A/B/C, WHO-Critical, etc.
     notes: str = ""
-    alert_threshold: int = 10  # Minimum reads to trigger alert
+    # Minimum reads to trigger an alert. None means "not stated";
+    # __post_init__ derives it from threat_level through the one table in
+    # default_alert_threshold, so a critical entry that names no threshold
+    # alerts at 5 reads rather than at a flat 10 that halved its sensitivity.
+    alert_threshold: Optional[int] = None
     action_required: str = "Follow laboratory biosafety protocols"
     organism_type: Optional[str] = None  # virus / bacteria / fungi / ...
     annotation: str = ""  # Free-text note shown next to the species name
+
+    def __post_init__(self):
+        if self.alert_threshold is None:
+            self.alert_threshold = default_alert_threshold(self.threat_level)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert PathogenEntry to dictionary representation."""
@@ -253,19 +261,25 @@ def _dict_to_pathogen_entry(
     """
     defaults = defaults or {}
 
+    threat_level = _parse_threat_level(
+        data.get("threat_level", defaults.get("threat_level", "moderate"))
+    )
+    # The entry's own value, else the file-level default, else the threat
+    # table. A flat 10 here disagreed with WatchlistEntry.from_dict for the
+    # same YAML, so a custom entry screened at two thresholds depending on
+    # which path loaded it (bug audit 2026-11-06, finding 33).
+    alert_threshold = data.get("alert_threshold", defaults.get("alert_threshold"))
+    if alert_threshold is None:
+        alert_threshold = default_alert_threshold(threat_level)
     return PathogenEntry(
         taxid=int(data["taxid"]),
         name=data["name"],
         common_name=data.get("common_name"),
-        threat_level=_parse_threat_level(
-            data.get("threat_level", defaults.get("threat_level", "moderate"))
-        ),
+        threat_level=threat_level,
         bsl=_parse_bsl_level(data.get("bsl_level", defaults.get("bsl_level"))),
         category=data.get("category"),
         notes=data.get("notes", ""),
-        alert_threshold=int(
-            data.get("alert_threshold", defaults.get("alert_threshold", 10))
-        ),
+        alert_threshold=int(alert_threshold),
         action_required=data.get(
             "action_required",
             defaults.get("action_required", "Follow laboratory biosafety protocols"),
@@ -412,9 +426,13 @@ class PathogenDatabase:
         if not self._user_watchlist:
             return
 
+        # No file-level alert_threshold: an entry that states none is left to
+        # _dict_to_pathogen_entry's threat-level table (critical 5 / high 10 /
+        # moderate 50 / low 100), the same one every other load path uses. A
+        # flat 10 here made a custom critical entry alert at 10 rather than 5
+        # (bug audit 2026-11-06, finding 33).
         defaults = {
             "threat_level": "moderate",
-            "alert_threshold": 10,
             "action_required": "Review and follow laboratory protocols",
         }
 
@@ -652,7 +670,8 @@ def export_watchlist_template(
 #   - bsl_level: 1, 2, 3, or 4
 #   - category: Classification category
 #   - notes: Additional information
-#   - alert_threshold: Minimum reads to trigger alert (default: 10)
+#   - alert_threshold: Minimum reads to trigger alert (default by threat
+#     level: critical 5, high 10, moderate 50, low 100)
 #   - action_required: Recommended action when detected
 
 version: "1.0"
