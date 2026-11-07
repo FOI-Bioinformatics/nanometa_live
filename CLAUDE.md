@@ -1674,8 +1674,15 @@ with nanorunner and found the end of a run to be the least truthful moment:
   Store never carried `results_output_directory` launched into a fresh
   `~/.nanometa/data/analysis_<ts>` while the modal promised the described
   folder. It now resolves via `resolve_run_outdir` and pins the directory
-  the modal showed. Root cause still open: `app.layout` is static, so a new
-  tab hydrates app-config from the boot-time config, not the session's.
+  the modal showed. `app.layout` is static, so a new tab hydrates app-config
+  from the boot-time config, not the session's; `hydrate_app_config_from_live_run`
+  reconciles it, but ONLY while the run is active. Once the run ends
+  `backend_manager.config` still holds the launched config, so a per-tick
+  overlay kept reverting a post-run Apply that moved the results folder for
+  the next run (the new folder reads as a divergent tab). Hydration now stands
+  aside when `status.running` is false; a fresh tab opened after the run is
+  adopted by `reseed_config_after_refresh` instead. Pinned in
+  `tests/test_startup_callbacks.py::TestPostRunReconfigurationSurvives`.
 - **Continue into a populated outdir shows the continued run.**
   `get_available_samples` unions the manifest with disk discovery (the
   manifest is written once, at session end, and describes the previous

@@ -193,6 +193,55 @@ class TestHydratedTabKeepsItsApplies:
         assert self._fn()(3, "dashboard-tab", dict(self.LIVE)) is no_update
 
 
+class TestPostRunReconfigurationSurvives:
+    """Bug audit 2026-11-06 follow-up: hydration must not fight a post-run
+    Apply. ``backend_manager.config`` is the launched config and persists
+    after the run ends, so once the run is no longer active the per-tick
+    overlay must stand aside -- otherwise an operator who changes the results
+    folder (or any setting) to prepare the next run sees it reverted to the
+    finished run's config on the next tick, because the new folder reads as a
+    "fresh tab holding another folder". A fresh tab opened after a completed
+    run is adopted by reseed_config_after_refresh, not here."""
+
+    LIVE = {
+        "results_output_directory": "/runs/r2",
+        "results_dir_override": "",
+        "nanopore_output_directory": "/inbox/r2",
+        "negative_control_samples": [],
+        "kraken_db": "/db",
+    }
+
+    def _fn(self, running):
+        from dash import Dash
+        backend = MagicMock()
+        backend.config = dict(self.LIVE)
+        backend.status = {"start_time": "2026-11-06T09:00:00", "running": running}
+        app = Dash(__name__, suppress_callback_exceptions=True)
+        register_startup(app, backend)
+        return get_callback_fn(app, "app-config.data", input_contains="tabs")
+
+    def test_post_run_results_folder_change_survives(self):
+        from dash import no_update
+        # The operator applied a new results folder for the next run after the
+        # last one finished. Its resolved dir differs from the finished run's,
+        # but the run is not active, so hydration leaves it alone.
+        applied = {
+            "results_output_directory": "/runs/r3",
+            "results_dir_override": "/runs/r3",
+            "nanopore_output_directory": "/inbox/r3",
+            "negative_control_samples": ["barcode16"],
+            "kraken_db": "/db",
+        }
+        assert self._fn(running=False)(5, "dashboard-tab", applied) is no_update
+
+    def test_running_run_still_pins_a_divergent_folder(self):
+        # While the run IS active the same divergent tab is still reconciled,
+        # so a live run cannot be moved out from under itself.
+        other = {"results_output_directory": "/runs/old", "kraken_db": "/db"}
+        out = self._fn(running=True)(5, "dashboard-tab", other)
+        assert out["results_output_directory"] == "/runs/r2"
+
+
 # --------------------------------------------------------------------------- #
 # warn_about_orphan_run_on_startup (field audit 2026-10-28, H3)
 # --------------------------------------------------------------------------- #

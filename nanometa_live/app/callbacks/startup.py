@@ -136,8 +136,21 @@ def register_startup(app, backend_manager):
         that.
         """
         live = getattr(backend_manager, "config", None)
-        started = bool((getattr(backend_manager, "status", None) or {}).get("start_time"))
+        status = getattr(backend_manager, "status", None) or {}
+        started = bool(status.get("start_time"))
         if not live or not started or not isinstance(live, dict):
+            return no_update
+        # Hydration owns the run's folders only while the run is RUNNING.
+        # ``backend_manager.config`` is the launched config and persists after
+        # the run ends, so a per-tick wholesale overlay kept reverting a
+        # POST-run Apply that moved the results folder for the next run: the
+        # tab's new folder differs from the finished run's, so it read as a
+        # fresh tab and was overwritten every tick (bug audit 2026-11-06,
+        # extension of finding 13). Once the run is no longer active the
+        # operator may reconfigure freely; a fresh tab opened afterwards is
+        # adopted by ``reseed_config_after_refresh`` (which fires for a
+        # completed/errored/stopped run too), not here.
+        if not status.get("running"):
             return no_update
         config = config or {}
         live_dir = resolve_outdir_for_fingerprint(live)

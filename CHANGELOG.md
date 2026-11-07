@@ -28,6 +28,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A post-run Apply that moves the results folder survives.**
+  `hydrate_app_config_from_live_run` overlaid the launched config
+  (`backend_manager.config`, set at Start and kept after the run ends) onto a
+  tab whose resolved results dir differed from the run's, on every tick. Once
+  a run finished and the operator applied a new results folder for the next
+  run, that tab's new folder differed from the finished run's, so it read as a
+  fresh "tab holding another folder" and was reverted to the old run's config
+  on the next poll. Hydration now acts only while `status.running`; after the
+  run ends the operator reconfigures freely, and a fresh tab opened afterwards
+  is adopted by `reseed_config_after_refresh` (which already fires for a
+  completed, errored or stopped run) rather than here. Pinned in
+  `tests/test_startup_callbacks.py::TestPostRunReconfigurationSurvives`; every
+  mid-run hydration test is unchanged.
 - **An NCBI watchlist name matches its GTDB counterpart without a taxid
   mapping.** The live name matcher (`TaxonomyMatcher.build_entry_index` /
   `match_row_indexed`, used by the dashboard's detection pass, the exported
