@@ -277,8 +277,24 @@
 
   <!-- DECISION BANNER -->
   {% set detected_threats = data.watched_results | selectattr("detected") | list %}
-  {% set critical_threats = detected_threats | selectattr("threat_level", "equalto", "critical") | list %}
-  {% set high_threats = detected_threats | selectattr("threat_level", "equalto", "high") | list %}
+  {#
+    ACTION REQUIRED is reserved for a detection that clears the ENTRY's own
+    alert_threshold, mirroring the dashboard: select_verdict decides on the
+    above-threshold list and renders a below-threshold hit as MONITORING.
+    This banner alarmed on a single read of a critical entry where the
+    dashboard did not (audit 2026-11-06, finding 36) -- and a threshold set
+    to 100 exists because one read of that organism is not actionable.
+
+    Nothing is hidden: a below-threshold detection still reaches
+    detected_threats and renders REVIEW RECOMMENDED, and the Watched
+    Organisms table lists its reads either way. rejectattr (not selectattr)
+    so a row from a caller that supplies no above_threshold key -- every
+    pre-existing caller, and the exported report of an older run -- keeps
+    the previous behaviour instead of silently dropping out of the banner.
+  #}
+  {% set alarming_threats = detected_threats | rejectattr("above_threshold", "equalto", false) | list %}
+  {% set critical_threats = alarming_threats | selectattr("threat_level", "equalto", "critical") | list %}
+  {% set high_threats = alarming_threats | selectattr("threat_level", "equalto", "high") | list %}
 
   {% if critical_threats or high_threats %}
   <div class="decision-banner banner-action">
