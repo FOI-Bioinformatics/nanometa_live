@@ -706,18 +706,24 @@ class NextflowManager:
 
                 logging.info(f"Command: {' '.join(cmd)}")
 
+                # Mark running BEFORE the launch thread exists. The thread's
+                # ``finally`` clears these flags when it ends; a launch that
+                # failed before Popen (unwritable log, missing offline conda
+                # cache) could end before this method set them, and the
+                # manager then read as running with no process until an
+                # operator Stop recorded the run as stopped by operator
+                # (audit 2026-11-06, finding 6: 197 of 200 launches).
+                self.running = True
+                self._launched_at = time.time()
+                self.status["running"] = True
+                self.status["last_updated"] = time.time()
+
                 # Start workflow in background thread
                 threading.Thread(
                     target=self._run_workflow,
                     args=(cmd, self._run_config),
                     daemon=True
                 ).start()
-
-                # Update status
-                self.running = True
-                self._launched_at = time.time()
-                self.status["running"] = True
-                self.status["last_updated"] = time.time()
 
                 return True, f"Nextflow pipeline started with profile: {profile}"
 
@@ -1084,6 +1090,9 @@ class NextflowManager:
             "stage_progress": {},
             "exit_code": None,
             "failed_tasks": [],
+            # The previous run's errors end with it; whatever this launch
+            # records from here on is this run's.
+            "errors": [],
         })
 
     def _monitor_status(self) -> None:
