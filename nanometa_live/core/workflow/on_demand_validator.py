@@ -25,6 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from nanometa_live.core.utils.atomic_write import atomic_write_json
 from nanometa_live.core.utils.read_extractor import ReadExtractor
 from nanometa_live.core.workflow import pathogen_genomes_store
 from nanometa_live.core.workflow.nextflow_manager import (
@@ -39,6 +40,7 @@ from nanometa_live.core.workflow.on_demand_helpers import (
     _pick_result_for_method,
     _validation_timeout_seconds,
     resolve_launch_context,
+    resource_ceiling_args,
     supervise_validation_process,
     write_failure_log,
 )
@@ -456,6 +458,7 @@ class OnDemandValidator:
             "--outdir", str(outdir),
             "-profile", pipeline_profile,
         ]
+        cmd.extend(resource_ceiling_args(config))  # the main run's ceilings (finding 32)
 
         # Timeout is operator-configurable: large reference genomes or slow
         # I/O can need more than the historical hardcoded 30 minutes.
@@ -678,15 +681,11 @@ class OnDemandValidator:
         )
 
     def _save_results(self, job: ValidationJob, method: str = "blast") -> None:
-        """Save validation results to JSON file (atomic write-then-rename,
-        matching ``_save_pathogen_genomes``, so a crash mid-write cannot
-        leave a truncated file that ``reload_on_demand_results`` then fails
-        to parse)."""
+        """Save validation results as JSON, atomically (write-then-rename)."""
         output_file = self.validation_dir / f"{job.sample}_{job.taxid}_validation.json"
         self.validation_dir.mkdir(parents=True, exist_ok=True)
 
-        # Compute percent_validated as a percentage (0-100)
-        percent_validated = job.validation_rate  # already stored as percentage
+        percent_validated = job.validation_rate  # already a percentage (0-100)
 
         # Determine validation_status via the parser's single source of truth
         # (ValidationResult.determine_status) so the on-demand and pipeline
@@ -709,6 +708,7 @@ class OnDemandValidator:
             "total_reads": job.total_reads,
             "validated_reads": job.validated_reads,
             "percent_validated": percent_validated,
+            "validation_rate": percent_validated,  # the key load_validation_result reads
             "percent_identity_mean": job.avg_identity,
             "validation_method": method,
             "validation_status": validation_status,
@@ -726,8 +726,7 @@ class OnDemandValidator:
         }
 
         try:
-            with open(output_file, 'w') as f:
-                json.dump(results, f, indent=2)
+            atomic_write_json(output_file, results)
             logger.info(f"Saved validation results to {output_file}")
         except (PermissionError, OSError, TypeError, ValueError) as e:
             logger.exception(f"Failed to save validation results: {e}")
@@ -755,7 +754,8 @@ class OnDemandValidator:
                 total_classified_reads=data.get("total_reads", 0),
                 extracted_reads=data.get("extracted_reads", 0),
                 validated_reads=data.get("validated_reads", 0),
-                validation_rate=data.get("validation_rate", 0.0),
+                validation_rate=data.get(
+                    "validation_rate", data.get("percent_validated", 0.0)),
                 avg_identity=data.get("avg_identity", 0.0),
                 min_identity=0.0,  # Not stored
                 max_identity=0.0,  # Not stored
