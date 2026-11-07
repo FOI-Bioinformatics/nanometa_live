@@ -447,9 +447,11 @@ class ReadinessChecker:
             )
         from nanometa_live.core.utils.paths import get_mappings_dir_from_env
         mappings_dir = Path(get_mappings_dir_from_env())
+        # Only the JSON index counts: TaxidMapper.load_database deletes a
+        # legacy ``_index.pkl`` and rebuilds, so a pickle-only install is
+        # NOT prepared (audit 2026-11-06, finding 37).
         index_file_json = mappings_dir / f"{db_hash}_index.json"
-        index_file_pkl = mappings_dir / f"{db_hash}_index.pkl"
-        if index_file_json.exists() or index_file_pkl.exists():
+        if index_file_json.exists():
             return CheckResult(
                 "DB Taxonomy Index", True, Severity.CRITICAL,
                 "Taxonomy index found"
@@ -457,7 +459,7 @@ class ReadinessChecker:
         return CheckResult(
             "DB Taxonomy Index", False, Severity.CRITICAL,
             "Taxonomy index not built (run preparation)",
-            details=f"expected at {index_file_json} or {index_file_pkl}"
+            details=f"expected at {index_file_json}"
         )
 
     def _check_taxid_mappings(
@@ -730,7 +732,9 @@ class ReadinessChecker:
             find_sample_subdirs,
             layout_mismatch_remedy,
         )
-        fastq_files = list(p.glob("*.fastq*"))
+        # Both spellings at the top level too; counting ``*.fastq*`` alone
+        # read a flat folder of ``.fq.gz`` files as empty (finding 37).
+        fastq_files = list(p.glob("*.fastq*")) + list(p.glob("*.fq*"))
         sample_dirs = find_sample_subdirs(str(p))
         dirs_with_reads = [
             d for d in sample_dirs if any(d.glob("*.fastq*")) or any(d.glob("*.fq*"))

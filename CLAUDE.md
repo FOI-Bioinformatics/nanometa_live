@@ -422,7 +422,7 @@ results/
 Notes:
 - `fastp/` and `seqkit/` are mutually exclusive; QC loaders try fastp first, fall back to seqkit.
 - `seqkit/<sample>.tsv` is the current flat layout (plus the incremental `seqkit/<sample>/batch_stats/*.tsv`). The older nested `seqkit/<sample>/stats/*.tsv` layout was retired in the 2026-06-02 sunset pass.
-- Nextflow trace lives at `pipeline_info/execution_trace_*.txt` (per `nextflow.config:407` in nanometanf). The GUI's NextflowManager redirects its own copy to `~/.nanometa/logs/trace.txt` for status polling, but the canonical pipeline emit is under `pipeline_info/`.
+- Nextflow trace lives at `pipeline_info/execution_trace_*.txt` (nanometanf's `trace {}` block). A `-with-trace` flag REPLACES that target rather than copying it, so the GUI's NextflowManager names its own path there: `<outdir>/pipeline_info/execution_trace_<launch ts>.txt` (`_run_trace_path`, kept in `trace_path` for the status poller). `-with-report` / `-with-timeline` are not sent; the pipeline's config writes both under `pipeline_info/`. Before 2026-11-07 all three went to `<data_dir>/logs/`, so the Reports tab's three Nextflow entries never existed on a GUI run and the export never carried them (audit finding 23). The data-dir `logs/trace.txt` is now only the fallback when the params carry no outdir.
 
 ## Configuration
 
@@ -1056,8 +1056,25 @@ not cover is left untouched. `OnDemandValidator._save_results` derives its
 threshold copy, so the two paths cannot drift. Both changed in the 2026-06-02
 validation audit.
 
-Requirements: `pipeline_source` configured, `save_reads_assignment: true`,
-original FASTQ accessible. `pipeline_source` is now mandatory: missing config
+Requirements: `pipeline_source` configured, per-read classifier output on
+disk, original FASTQ accessible. **What "per-read output" means depends on
+the classifier branch, and today a default GUI run has none the pipeline
+entry can read** (audit 2026-11-06, finding 4). The GUI forces
+`kraken2_enable_incremental` and real time always takes the incremental
+branch; as of nanometanf `8c09b38` that branch publishes only
+`kraken2/<sample>/batches/batch_N.kraken2.output.txt` (per batch, always)
+and `kraken2/<sample>.cumulative.kraken2.output.txt` (at session end), never
+`<sample>.kraken2.classified.fastq.gz` or a flat `<sample>.kraken2.output.txt`
+-- those two are published by `KRAKEN2_KRAKEN2` (standard mode) only. The
+GUI side reads what exists: `core/utils/read_extractor.py` resolves the
+cumulative output, else every `batches/` file, else the flat legacy names;
+and `parameter_mapping` sends `save_reads_assignment` / `save_output_fastqs`
+when the config sets them, not only when watchlist validation is on.
+nanometanf WP2a (`claude/fix-realtime-resume-validation`) adds the
+classified-FASTQ and flat per-read publish to the incremental branch so
+`--validation_only` finds its inputs after a default run; until it merges,
+the on-demand launch after an incremental run reports "did not return a
+result". `pipeline_source` is now mandatory: missing config
 or a `None` return from `validate_via_nanometanf` produces a failed
 `ValidationResult` with a descriptive `error_message` instead of silently
 running a parallel subprocess path. The legacy local-subprocess fallback was
@@ -1301,7 +1318,11 @@ The 25.10.x watchPath JVM cleanup hang (the historical reason for the
 `NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0.
 
 **nanometanf floor.** `core/workflow/pipeline_compat.py` owns
-`NANOMETANF_MIN_VERSION` (1.10.0 as of 0.18.0). `NextflowManager.setup`
+`NANOMETANF_MIN_VERSION` (1.12.0 since 2026-11-07: the first nanometanf that
+accepts a digit-only `sample_name`, a single `taxids_to_validate` and a
+schema-validated `--validation_only`, all of which the GUI sends; a
+`1.12.0dev` checkout passes as the development pre-release of the floor).
+`NextflowManager.setup`
 refuses a checkout below it by name, the readiness checklist carries a
 "Pipeline Version" row, and the README compatibility matrix names the same
 floor (fence: `tests/test_compatibility_matrix.py`). A `remote:` source runs

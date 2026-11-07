@@ -19,6 +19,7 @@ import yaml
 
 from nanometa_live.core.utils.kraken_utils import KRAKEN_REQUIRED_FILES
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
+from nanometa_live.core.workflow.pipeline_compat import NANOMETANF_MIN_VERSION
 from pathlib import Path
 
 pytestmark = pytest.mark.unit
@@ -535,7 +536,7 @@ class TestSetupPipelineFloor:
         m = NextflowManager(str(tmp_path), pipeline_source=f"local:{pipe}")
         ok, message = m.setup(self._config(tmp_path))
         assert ok is False
-        assert "1.4.1dev" in message and "1.11.0" in message
+        assert "1.4.1dev" in message and NANOMETANF_MIN_VERSION in message
 
     def test_refusal_happens_before_parameters_are_built(self, tmp_path):
         pipe = self._checkout(tmp_path, "1.4.1dev")
@@ -569,7 +570,7 @@ class TestSetupPipelineFloor:
             ok, message = m.setup(config_path)
 
         assert ok is True, message
-        assert any("1.11.0" in w for w in m.launch_warnings), m.launch_warnings
+        assert any(NANOMETANF_MIN_VERSION in w for w in m.launch_warnings), m.launch_warnings
 
 
 class TestSeedNextflowHome:

@@ -122,10 +122,21 @@ def _checkout(tmp_path, version):
 
 class TestCheckPipelineCompatibility:
     def test_ok_at_or_above_floor(self, tmp_path):
-        v = pc.check_pipeline_compatibility(str(_checkout(tmp_path, "1.11.0")))
+        v = pc.check_pipeline_compatibility(str(_checkout(tmp_path, "1.12.0")))
         assert v.status == "ok"
-        assert v.found_version == "1.11.0"
-        assert "1.11.0" in v.message
+        assert v.found_version == "1.12.0"
+        assert "1.12.0" in v.message
+
+    def test_dev_checkout_of_the_floor_passes_the_default_floor(self, tmp_path):
+        # nanometanf dev is 1.12.0dev: the checkout the floor names, untagged.
+        v = pc.check_pipeline_compatibility(str(_checkout(tmp_path, "1.12.0dev")))
+        assert v.status == "ok"
+
+    def test_last_release_is_below_the_floor(self, tmp_path):
+        # 1.11.0 refuses a digit-only sample_name and the single-taxid
+        # on-demand call; the GUI sends both (audit 2026-11-06, finding 28).
+        v = pc.check_pipeline_compatibility(str(_checkout(tmp_path, "1.11.0")))
+        assert v.status == "too_old"
 
     def test_too_old_names_both_versions_and_the_fix(self, tmp_path):
         v = pc.check_pipeline_compatibility(str(_checkout(tmp_path, "1.4.1dev")))
@@ -140,13 +151,13 @@ class TestCheckPipelineCompatibility:
         results = tmp_path / "results"
         checkout = results / ".nextflow" / "assets" / "foi-bioinformatics" / "nanometanf"
         checkout.mkdir(parents=True)
-        _checkout(checkout, "1.11.1dev")
+        _checkout(checkout, "1.12.1dev")
         config = {"results_output_directory": str(results)}
 
         v = pc.check_pipeline_compatibility("remote:dev", config=config)
 
         assert v.status == "ok"
-        assert v.found_version == "1.11.1dev"
+        assert v.found_version == "1.12.1dev"
         assert str(checkout) in v.message
 
     def test_too_old_remote_remedy_names_nxf_home_for_non_default_root(self, tmp_path, monkeypatch):

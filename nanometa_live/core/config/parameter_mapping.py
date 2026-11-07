@@ -850,6 +850,31 @@ def _resolve_max_memory_gb(config: Dict[str, Any]) -> Optional[int]:
     return max(MAX_MEMORY_FLOOR_GB, math.floor(total_gb) - HOST_MEMORY_HEADROOM_GB)
 
 
+def resource_ceiling_params(config: Dict[str, Any]) -> Dict[str, Any]:
+    """``max_cpus`` / ``max_memory`` exactly as the main launch sends them.
+
+    The Configuration tab's CPU Cores field is nanometanf's per-task
+    ceiling, omitted when empty so the pipeline default or platform profile
+    applies (audit round 5, A9). The memory ceiling is the host's own, so a
+    request sized above the laptop is clamped by the pipeline instead of
+    aborting the run (see ``_resolve_max_memory_gb``). The on-demand
+    validation launch sends the same pair: without it BLAST and minimap2
+    asked ``8.GB * attempt`` under the pipeline's 16 GB default and an 8 GB
+    laptop aborted where the main run had been clamped (audit 2026-11-06,
+    finding 32).
+    """
+    params: Dict[str, Any] = {}
+    max_cpus = config.get("max_cpus")
+    if max_cpus not in (None, ""):
+        params["max_cpus"] = int(max_cpus)
+    max_memory = _resolve_max_memory_gb(config)
+    if max_memory is not None:
+        params["max_memory"] = (
+            max_memory if isinstance(max_memory, str) else f"{int(max_memory)}.GB"
+        )
+    return params
+
+
 def _resolve_kraken2_task_memory_gb(config: Dict[str, Any]) -> Optional[int]:
     """Per-task reservation under memory mapping, or None to keep the full size.
 
@@ -954,8 +979,12 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         # Save reads assignment and classified FASTQs (required for validation):
         # save_reads_assignment gives per-read Kraken2 output (which reads map to
         # which taxid); save_output_fastqs gives the classified reads to BLAST.
-        "save_reads_assignment": run_validation_enabled,
-        "save_output_fastqs": run_validation_enabled,
+        # A config asking for them explicitly gets them too: the on-demand
+        # check reads exactly these files (audit 2026-11-06, finding 4).
+        "save_reads_assignment": bool(
+            run_validation_enabled or config.get("save_reads_assignment", False)),
+        "save_output_fastqs": bool(
+            run_validation_enabled or config.get("save_output_fastqs", False)),
 
         # Validation parameters - nanometanf VALIDATION subworkflow
         **_validation_params(config, run_validation_enabled, blast_validation_enabled),
@@ -1423,21 +1452,8 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     if task_memory_gb is not None:
         params["kraken2_task_memory_gb"] = task_memory_gb
 
-    # The Configuration tab's CPU Cores field: nanometanf's per-task ceiling.
-    # Omitted when empty so the pipeline default (16) or platform profile
-    # applies (audit round 5, A9).
-    max_cpus = config.get("max_cpus")
-    if max_cpus not in (None, ""):
-        params["max_cpus"] = int(max_cpus)
-
-    # The host's own memory ceiling, so a Kraken2 request sized from a
-    # database larger than the laptop is clamped by the pipeline instead
-    # of aborting the run. See _resolve_max_memory_gb.
-    max_memory = _resolve_max_memory_gb(config)
-    if max_memory is not None:
-        params["max_memory"] = (
-            max_memory if isinstance(max_memory, str) else f"{int(max_memory)}.GB"
-        )
+    # The host's CPU and memory ceilings (shared with the on-demand launch).
+    params.update(resource_ceiling_params(config))
 
     # Add validation species if configured (from Watchlist or legacy config)
     if has_species and validation_taxids:
