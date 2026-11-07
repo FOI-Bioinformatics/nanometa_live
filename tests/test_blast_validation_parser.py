@@ -873,3 +873,48 @@ class TestUnstableSkipIsNotCached:
         p = ValidationParser(str(tmp_path))
         p.get_validation_results()
         assert p._results_cache is not None, "a result with no skip must be cached"
+
+
+class TestLayoutIsReprobedPerRead:
+    """The parser must not pin the validation layout at construction.
+
+    Audit 2026-11-06, finding 7: with ``validation_method: both`` minimap2
+    finishes first, so the shared parser was built while only
+    ``validation/minimap2/`` existed and pinned ``validation/``. Every later
+    ``blast.tsv`` landed in ``validation/blast/``, which its glob never
+    looked at, and the BLAST sub-tab stayed empty for the process lifetime
+    while a fresh parser found the result (``audit_loaders/t_valdir.py``).
+    """
+
+    def test_singleton_sees_blast_dir_that_appears_later(self, tmp_path):
+        from nanometa_live.core.parsers.blast_validation_parser import (
+            get_validation_parser, reset_validation_parsers,
+        )
+        reset_validation_parsers()
+        (tmp_path / "validation" / "minimap2").mkdir(parents=True)
+        p = get_validation_parser(str(tmp_path))
+        assert p.validation_dir == tmp_path / "validation", "precondition"
+        assert p.get_validation_results() == []
+
+        blast = tmp_path / "validation" / "blast"
+        blast.mkdir()
+        _write_blast(blast / "barcode01_taxid562.blast.tsv", ROWS_12)
+        p2 = get_validation_parser(str(tmp_path))
+        assert p2 is p, "the singleton is reused, so it must re-probe itself"
+        got = [(r.sample_id, r.taxid, r.validation_method)
+               for r in p2.get_validation_results()]
+        assert got == [("barcode01", 562, "blast")]
+        assert p2.validation_dir == blast
+        reset_validation_parsers()
+
+    def test_validation_blast_is_globbed_even_when_a_legacy_dir_wins(self, tmp_path):
+        # A legacy top-level blast_validation/ resolves first; nanometanf's
+        # own publish location must still be scanned.
+        (tmp_path / "blast_validation").mkdir()
+        blast = tmp_path / "validation" / "blast"
+        blast.mkdir(parents=True)
+        _write_blast(blast / "barcode01_taxid562.blast.tsv", ROWS_12)
+        p = ValidationParser(str(tmp_path))
+        assert p.validation_dir == tmp_path / "blast_validation"
+        got = [(r.sample_id, r.taxid) for r in p.get_validation_results()]
+        assert got == [("barcode01", 562)]

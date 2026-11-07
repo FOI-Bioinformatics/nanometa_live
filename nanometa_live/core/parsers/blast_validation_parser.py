@@ -271,12 +271,10 @@ class ValidationParser:
         # nanometanf v1.1+ publishes individual BLAST files to validation/blast/
         # and the aggregate JSON to validation/validation_results.json.
         # Legacy layouts used blast_validation/ or blast/ at the top level.
-        self.validation_dir = None
-        for dirname in ['blast_validation', 'validation/blast', 'validation', 'blast']:
-            test_dir = self.results_dir / dirname
-            if test_dir.exists():
-                self.validation_dir = test_dir
-                break
+        # The answer is re-probed on every read (_refresh_validation_dir):
+        # the layout is not fixed at construction time.
+        self.validation_dir = self._probe_validation_dir()
+        self._probed_validation_dir = self.validation_dir
 
         if self.validation_dir:
             logger.info(f"ValidationParser initialized with dir: {self.validation_dir}")
@@ -294,6 +292,66 @@ class ValidationParser:
         # if the directory's mtime is unchanged.
         self._results_cache_mtime: Optional[float] = None
         self._results_cache: Optional[List["ValidationResult"]] = None
+        self._fingerprint_epoch: Optional[int] = None
+        self._fingerprint_value: Optional[float] = None
+
+    #: Candidate layouts, most specific first.
+    _VALIDATION_DIR_CANDIDATES = (
+        'blast_validation', 'validation/blast', 'validation', 'blast',
+    )
+
+    def _probe_validation_dir(self) -> Optional[Path]:
+        """The first existing candidate directory, or None."""
+        for dirname in self._VALIDATION_DIR_CANDIDATES:
+            test_dir = self.results_dir / dirname
+            if test_dir.exists():
+                return test_dir
+        return None
+
+    def _refresh_validation_dir(self) -> None:
+        """Re-probe the layout; a changed answer drops the results cache.
+
+        With ``validation_method: both`` minimap2 finishes first, so the
+        parser built on the first poll pinned ``validation/`` and every
+        later ``blast.tsv`` landed in ``validation/blast/``, a directory
+        its glob never looked at: the BLAST sub-tab stayed empty for the
+        life of the process while a fresh parser found the result (audit
+        2026-11-06, finding 7). Four ``exists`` calls per read.
+        """
+        current = self._probe_validation_dir()
+        # Compared with the previous PROBE, not with validation_dir: a
+        # caller that pointed the parser at a directory by hand keeps it
+        # for as long as the layout on disk is unchanged.
+        if current == getattr(self, "_probed_validation_dir", None):
+            return
+        logger.info("Validation layout changed: %s -> %s",
+                    self.validation_dir, current)
+        self._probed_validation_dir = current
+        self.validation_dir = current
+        self._results_cache = None
+        self._results_cache_mtime = None
+        self._fingerprint_value = None
+        self._fingerprint_epoch = None
+
+    def _blast_tsv_dirs(self) -> List[Path]:
+        """Directories whose ``*.blast.tsv`` files are read.
+
+        ``validation_dir`` plus nanometanf's own ``validation/blast/`` when
+        that is a different directory (a legacy top-level layout resolving
+        first), so the current publish location is always scanned.
+        """
+        dirs: List[Path] = []
+        if self.validation_dir is not None:
+            dirs.append(self.validation_dir)
+        direct = self.results_dir / 'validation' / 'blast'
+        if direct.is_dir():
+            try:
+                same = any(direct.resolve() == d.resolve() for d in dirs)
+            except OSError:
+                same = any(direct == d for d in dirs)
+            if not same:
+                dirs.append(direct)
+        return dirs
 
     def _cached_fingerprint(self) -> Optional[float]:
         """The dir fingerprint, skipping the walk within one freshness epoch.
@@ -382,6 +440,7 @@ class ValidationParser:
 
     def has_validation_data(self) -> bool:
         """Check if any validation data exists."""
+        self._refresh_validation_dir()
         if self.validation_dir and self.validation_dir.exists():
             # Check for any validation files
             patterns = ['*.json', '*.blast.tsv']
@@ -736,6 +795,9 @@ class ValidationParser:
                 and (taxid is None or r.taxid == taxid)
             ]
 
+        # The layout can change under a running parser (finding 7).
+        self._refresh_validation_dir()
+
         # Cache fast-path: if the validation directory has not changed
         # since the last full parse, reuse the cached unfiltered list
         # and apply the (sample, taxid) filter in-memory.
@@ -858,9 +920,14 @@ class ValidationParser:
         from nanometa_live.core.parsers.blast_stats import (
             apply_blast_stats, collect_blast_stats,
         )
-        blast_stats_by_pair = collect_blast_stats(self.validation_dir)
+        # validation_dir plus nanometanf's validation/blast/ when distinct
+        # (finding 7): the publish location is always scanned.
+        blast_dirs = self._blast_tsv_dirs()
+        blast_stats_by_pair: Dict[Tuple[str, int], dict] = {}
+        for blast_dir in blast_dirs:
+            blast_stats_by_pair.update(collect_blast_stats(blast_dir))
 
-        for blast_file in self.validation_dir.glob('*.blast.tsv'):
+        for blast_file in (f for d in blast_dirs for f in d.glob('*.blast.tsv')):
             # Try to extract sample and taxid from filename
             # Expected format: sample_taxid.blast.tsv
             stem = blast_file.stem.replace('_blast', '').replace('.blast', '')
