@@ -41,6 +41,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   completed, errored or stopped run) rather than here. Pinned in
   `tests/test_startup_callbacks.py::TestPostRunReconfigurationSurvives`; every
   mid-run hydration test is unchanged.
+- **A custom watchlist entry with no `alert_threshold` screens at its threat
+  level's default, not a flat 10.** Three paths defaulted an unstated
+  threshold to 10 where `WatchlistEntry.from_dict` derived it from the threat
+  level (critical 5 / high 10 / moderate 50 / low 100): the `PathogenEntry`
+  dataclass field, `PathogenDatabase._load_user_watchlist`'s `defaults` dict,
+  and the custom-entry branch of `check_for_dangerous_pathogens`. The same
+  custom critical entry therefore alerted at 5 reads on the dashboard's
+  watchlist pass and at 10 through the alert database, and a critical entry
+  loaded straight from YAML was half as sensitive as the table intends.
+  `alert_threshold` is now `None`-when-unstated everywhere and derived through
+  the one `default_alert_threshold` table; an explicit operator value is
+  always kept. The Watchlist tab's pathogen row shows the derived value rather
+  than a flat placeholder, and `docs/configuration.md` states the per-threat
+  defaults. Pinned in `tests/test_custom_watchlist_threshold_default.py`
+  alongside the existing `tests/test_alert_threshold_single_default.py`.
 
 - **A mid-run Apply Settings survives the next tick.**
   `hydrate_app_config_from_live_run` copied the live config (what the
