@@ -18,6 +18,7 @@ from nanometa_live.core.utils.sample_detector import get_available_samples, get_
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.tabs.config_tab_helpers import RUNNING_RUN_PATH_KEYS
 from nanometa_live.app.utils.debounce import (
     should_skip_update, get_trigger_type,
     interval_render_is_redundant, mark_rendered,
@@ -110,19 +111,45 @@ def register_startup(app, backend_manager):
         tab's collision Continue then launched with an empty outdir and the
         negative control declared twenty minutes earlier was gone (H34/H33).
         While a run exists in this app process, its config is the truth for
-        every tab; before any run the boot config stands (boot is fresh by
-        design). Runs on the first interval tick or tab click after load
-        (an allow_duplicate output cannot fire on the initial call); a dict
-        compare per tick, no I/O, and no_update when nothing differs.
+        a tab that has not yet received it; before any run the boot config
+        stands (boot is fresh by design). Runs on the first interval tick or
+        tab click after load (an allow_duplicate output cannot fire on the
+        initial call); a dict compare per tick, no I/O, and no_update when
+        nothing differs.
+
+        The live config is the config the pipeline was LAUNCHED with
+        (``backend_manager.config`` is assigned at Start and never by
+        Apply), so it is copied wholesale only into a tab whose own results
+        dir (resolved as the fingerprint resolves it) is not the run's. A
+        tab whose dir is the run's has been hydrated, and every later
+        difference is an Apply made in it:
+        overlaying the whole live config there reverted a mid-run Apply of
+        ``negative_control_samples``, ``min_reads_for_validation`` or
+        ``update_interval_seconds`` within one poll, while the toast had
+        just promised they take effect now (bug audit 2026-11-06, finding
+        13). Such a tab gets only ``RUNNING_RUN_PATH_KEYS`` overlaid, the
+        same keys ``pin_running_run_paths`` holds on Apply, so the run's
+        folders still cannot drift. Updating the backend's config on Apply
+        instead was rejected: ``backend_manager.config`` records what the
+        pipeline is running with (the collision modal's settings diff and
+        the layout-mismatch poll read it), and an Apply must not rewrite
+        that.
         """
         live = getattr(backend_manager, "config", None)
         started = bool((getattr(backend_manager, "status", None) or {}).get("start_time"))
         if not live or not started or not isinstance(live, dict):
             return no_update
-        if config and all(config.get(k) == v for k, v in live.items()):
+        config = config or {}
+        live_dir = resolve_outdir_for_fingerprint(live)
+        hydrated = bool(live_dir) and resolve_outdir_for_fingerprint(config) == live_dir
+        if hydrated:
+            overlay = {k: live[k] for k in RUNNING_RUN_PATH_KEYS if live.get(k)}
+        else:
+            overlay = live
+        if all(config.get(k) == v for k, v in overlay.items()):
             return no_update
-        merged = dict(config or {})
-        merged.update(live)
+        merged = dict(config)
+        merged.update(overlay)
         return merged
 
     @app.callback(

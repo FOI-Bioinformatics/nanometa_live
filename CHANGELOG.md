@@ -28,6 +28,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A mid-run Apply Settings survives the next tick.**
+  `hydrate_app_config_from_live_run` copied the live config (what the
+  pipeline was launched with; Apply never changes it) over every tab's
+  `app-config` on every poll while a run existed, so a
+  `negative_control_samples`, `min_reads_for_validation` or
+  `update_interval_seconds` applied mid-run was reverted within one poll
+  while the toast promised it took effect now (bug audit 2026-11-06,
+  finding 13). A tab that already carries the run's results dir has been
+  hydrated and now receives only the running-run path keys
+  (`RUNNING_RUN_PATH_KEYS`, the set `pin_running_run_paths` holds on
+  Apply); a tab without it, or holding another folder, still receives the
+  live config wholesale.
+
 - **`sample_name` is sent to the pipeline as a string.** A YAML
   `sample_name: 7` loaded as an int and reached nanometanf's `InputDetector`,
   which takes a String. The mapping coerces it; a digit-only name such as
