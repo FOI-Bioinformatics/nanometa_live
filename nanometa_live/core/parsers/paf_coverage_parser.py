@@ -283,8 +283,15 @@ def paf_breadth(paf_path, min_mapq: int = 0) -> Optional["PafBreadth"]:
                       if k[0] == key[0] and k[3] == min_mapq and k != key]:
             _breadth_cache.pop(stale, None)
 
-    intervals: List[tuple] = []
-    ref_len = 0
+    # Intervals grouped per target sequence. A reference genome is usually
+    # many sequences (chromosome + plasmids, or a draft assembly's contigs),
+    # each with its own 0-based coordinate space. Pooling every interval into
+    # one list and dividing by the longest contig over-counts breadth and can
+    # exceed 1.0 (bug audit 2026-11-08, finding 4). Key by target name (col
+    # 5), merge per contig, and divide by the summed length of the contigs
+    # that appear -- the same per-reference approach parse_paf_coverage uses.
+    per_ref: Dict[str, List[tuple]] = {}
+    ref_lengths: Dict[str, int] = {}
     aligned = 0
     try:
         with open(path) as fh:
@@ -293,30 +300,33 @@ def paf_breadth(paf_path, min_mapq: int = 0) -> Optional["PafBreadth"]:
                 if len(parts) < 12:
                     continue
                 try:
+                    tname = parts[5]
                     tlen, tstart, tend = int(parts[6]), int(parts[7]), int(parts[8])
                     mapq = int(parts[11])
-                except ValueError:
+                except (ValueError, IndexError):
                     continue
                 if mapq < min_mapq or tend <= tstart or tend > tlen:
                     continue
-                ref_len = max(ref_len, tlen)
-                intervals.append((tstart, tend))
+                per_ref.setdefault(tname, []).append((tstart, tend))
+                ref_lengths[tname] = tlen
                 aligned += tend - tstart
     except (OSError, UnicodeDecodeError):
         return None
-    if not intervals:
+    if not per_ref:
         return None
 
-    intervals.sort()
     covered = 0
-    cur_start, cur_end = intervals[0]
-    for start, end in intervals[1:]:
-        if start > cur_end:
-            covered += cur_end - cur_start
-            cur_start, cur_end = start, end
-        elif end > cur_end:
-            cur_end = end
-    covered += cur_end - cur_start
+    for intervals in per_ref.values():
+        intervals.sort()
+        cur_start, cur_end = intervals[0]
+        for start, end in intervals[1:]:
+            if start > cur_end:
+                covered += cur_end - cur_start
+                cur_start, cur_end = start, end
+            elif end > cur_end:
+                cur_end = end
+        covered += cur_end - cur_start
+    ref_len = sum(ref_lengths.values())
 
     result = PafBreadth(ref_length=ref_len, covered_bp=covered, aligned_bp=aligned)
     with _breadth_cache_lock:

@@ -234,3 +234,75 @@ class TestBlastFallbackDenominatorIsTheClade:
             "the cache entry was keyed on validation/ alone and served the "
             "old denominator after the Kraken2 report advanced"
         )
+
+
+class TestFlextaxdDbTaxidMatch:
+    """On a flextaxd/GTDB database a grafted organism's db node taxid differs
+    from its NCBI taxid; nanometanf names the BLAST files and keys the kraken
+    report by the db taxid, while the watchlist carries the NCBI taxid and the
+    organism card looks the result up by the displayed db taxid. The loader
+    must match on the db taxid and surface the result under both ids (bug
+    audit 2026-11-08, finding 1)."""
+
+    # B. anthracis: NCBI 1392, grafted db node 4005020.
+    WATCHLIST = [{"taxid": 1392, "name": "Bacillus anthracis",
+                  "db_taxid": 4005020}]
+
+    @pytest.fixture(autouse=True)
+    def _clear(self):
+        from nanometa_live.core.utils import loader_utils
+        loader_utils.clear_all_loader_caches()
+        yield
+        loader_utils.clear_all_loader_caches()
+
+    @staticmethod
+    def _run(tmp_path, n_reads=90):
+        import os
+        import time
+        kraken = tmp_path / "kraken2"
+        kraken.mkdir(exist_ok=True)
+        report = kraken / "barcode01.kraken2.report.txt"
+        # The report row is keyed by the db taxid, under the GTDB name.
+        report.write_text(
+            "100.00\t100\t0\tR\t1\troot\n"
+            " 90.00\t100\t100\tS\t4005020\tBacillus_A anthracis\n"
+        )
+        t = time.time() - 120
+        os.utime(report, (t, t))
+        blast = tmp_path / "validation" / "blast"
+        blast.mkdir(parents=True, exist_ok=True)
+        (blast / "barcode01_taxid4005020.blast.tsv").write_text(
+            "".join(f"read{i}\tref\t98.0\n" for i in range(n_reads)))
+
+    def test_db_taxid_file_and_denominator_resolve(self, tmp_path):
+        self._run(tmp_path)
+        out = load_blast_validation_data(str(tmp_path), self.WATCHLIST)
+        # Found under the db taxid (what the organism card looks up by)...
+        assert 4005020 in out
+        assert out[4005020]["validated_reads"] == 90
+        assert out[4005020]["total_reads"] == 100
+        assert out[4005020]["status"] == "validated"
+        # ...and under the NCBI taxid, so either lookup path hits.
+        assert 1392 in out
+        assert out[1392]["validated_reads"] == 90
+
+    def test_ncbi_db_still_matches_by_taxid(self, tmp_path):
+        # db_taxid absent (NCBI database): behaviour unchanged, keyed by taxid.
+        import os
+        import time
+        kraken = tmp_path / "kraken2"
+        kraken.mkdir(exist_ok=True)
+        report = kraken / "barcode01.kraken2.report.txt"
+        report.write_text(
+            "100.00\t100\t0\tR\t1\troot\n"
+            " 90.00\t100\t100\tS\t562\tEscherichia coli\n"
+        )
+        t = time.time() - 120
+        os.utime(report, (t, t))
+        blast = tmp_path / "validation" / "blast"
+        blast.mkdir(parents=True, exist_ok=True)
+        (blast / "barcode01_taxid562.blast.tsv").write_text("r0\tref\t98\n")
+        out = load_blast_validation_data(
+            str(tmp_path), [{"taxid": 562, "name": "Escherichia coli"}])
+        assert out[562]["validated_reads"] == 1
+        assert out[562]["total_reads"] == 100

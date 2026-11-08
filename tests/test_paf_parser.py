@@ -354,3 +354,42 @@ class TestBreadthCacheIsLocked:
             t.join()
         assert not errors, errors
         pcp._breadth_cache.clear()
+
+
+class TestPafBreadthPerContig:
+    """paf_breadth must compute breadth per target sequence, not by pooling
+    every contig's intervals into one coordinate space (bug audit 2026-11-08,
+    finding 4). A multi-contig reference pooled into one space over-counts and
+    can exceed 1.0."""
+
+    def test_two_contigs_are_not_pooled(self, tmp_path: Path) -> None:
+        from nanometa_live.core.parsers.paf_coverage_parser import paf_breadth
+        paf = tmp_path / "two_contig.paf"
+        # contigA 1,000,000 bp covered [0, 900k]; contigB 1,000,000 bp covered
+        # [100k, 1,000k]. Per-reference breadth = 1,800,000 / 2,000,000 = 0.90.
+        # Pooling (the bug) merges both into one space and divides by the
+        # single max tlen -> covered 1,000,000 / 1,000,000 = 1.0.
+        lines = [
+            "rA\t900000\t0\t900000\t+\tcontigA\t1000000\t0\t900000\t900000\t900000\t60",
+            "rB\t900000\t0\t900000\t+\tcontigB\t1000000\t100000\t1000000\t900000\t900000\t60",
+        ]
+        paf.write_text("\n".join(lines) + "\n")
+
+        result = paf_breadth(str(paf))
+        assert result is not None
+        assert result.ref_length == 2_000_000
+        assert result.covered_bp == 1_800_000
+        assert abs(result.breadth - 0.90) < 1e-6
+        assert result.breadth <= 1.0
+
+    def test_single_contig_unchanged(self, tmp_path: Path) -> None:
+        from nanometa_live.core.parsers.paf_coverage_parser import paf_breadth
+        paf = tmp_path / "one_contig.paf"
+        paf.write_text(
+            "r1\t500\t0\t500\t+\tref1\t1000\t0\t500\t500\t500\t60\n"
+        )
+        result = paf_breadth(str(paf))
+        assert result is not None
+        assert result.ref_length == 1000
+        assert result.covered_bp == 500
+        assert abs(result.breadth - 0.5) < 1e-6
