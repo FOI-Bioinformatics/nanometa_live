@@ -28,6 +28,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The dashboard Alerts panel surfaces a pipeline ERROR on an output-less
+  run.** `compute_overall_status_cache` recomputed only on a results-fingerprint
+  change or a non-redundant interval tick, and a run that errors without
+  writing to the watched data subdirs does not change the fingerprint, so the
+  cache never re-ran `run_status_for_alerts` with the error state and the alert
+  engine's error/completion branch saw a healthy run. The cache now bypasses
+  the redundant-interval gate on a run-state change (ACTIVE / ERROR / COMPLETE
+  / STOPPED / STANDBY), mirroring the verdict banner's `_VERDICT_LAST_RUN_STATE`
+  bypass; `backend-status` stays a State so its per-tick churn does not defeat
+  the gate. Pinned in
+  `tests/test_dashboard_tab_callbacks.py::TestStatusCacheRecomputesOnRunStateChange`.
+
+- **Doc:** three QC callbacks (`update_per_sample_table`,
+  `update_base_quality_card`, `update_read_statistics_card`) had their
+  docstring placed below the `active_tab` guard, making it a dead expression;
+  moved above the guard. No runtime change.
+
+
 - **A post-run Apply that moves the results folder survives.**
   `hydrate_app_config_from_live_run` overlaid the launched config
   (`backend_manager.config`, set at Start and kept after the run ends) onto a

@@ -598,13 +598,13 @@ def register_qc_callbacks(app: Dash):
         ],
     )
     def update_per_sample_table(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
-        if active_tab != "qc-tab":
-            raise PreventUpdate
         """
         Update the per-sample breakdown table with statistics for each barcode.
 
         This table shows individual stats for each detected sample/barcode.
         """
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         if interval_tick_is_redundant(ctx, "qc_per_sample_table", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_per_sample_table", _fingerprint)
@@ -647,8 +647,6 @@ def register_qc_callbacks(app: Dash):
         ],
     )
     def update_base_quality_card(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
-        if active_tab != "qc-tab":
-            raise PreventUpdate
         """
         Update the base quality card showing Q20/Q30 rates and optional sparkline.
 
@@ -656,6 +654,8 @@ def register_qc_callbacks(app: Dash):
         - FASTP: q20_bases, q30_bases, total_bases, quality_curves
         - Seqkit (Chopper): Q20(%), Q30(%), sum_len
         """
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         if interval_tick_is_redundant(ctx, "qc_base_quality", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_base_quality", _fingerprint)
@@ -768,8 +768,6 @@ def register_qc_callbacks(app: Dash):
         ],
     )
     def update_read_statistics_card(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
-        if active_tab != "qc-tab":
-            raise PreventUpdate
         """
         Update the read statistics card showing mean length, N50, and GC content.
 
@@ -777,6 +775,8 @@ def register_qc_callbacks(app: Dash):
         - FASTP: read1_mean_length (before/after), gc_content
         - Seqkit (Chopper): avg_len, N50, GC(%)
         """
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         if interval_tick_is_redundant(ctx, "qc_read_stats", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_read_stats", _fingerprint)
