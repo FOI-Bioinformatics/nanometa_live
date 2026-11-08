@@ -101,6 +101,7 @@ from nanometa_live.app.app import background_callback_manager
 # update_verdict_banner). In-process on purpose: after a restart the worst
 # case is one extra render.
 _VERDICT_LAST_RUN_STATE: dict = {}
+_ALERTS_LAST_RUN_STATE: dict = {}
 
 logger = logging.getLogger(__name__)
 
@@ -199,9 +200,30 @@ def register_dashboard_callbacks(app: Dash):
     )
     def compute_overall_status_cache(_fingerprint, _n_intervals, config, status, available_samples):
         """Compute overall status once per interval and cache for other callbacks."""
-        if interval_tick_is_redundant(ctx, "dashboard_overall_status", _fingerprint):
+        # A run-state change (e.g. running -> error, or -> completed) must
+        # recompute the cache even when no new output files landed: the alert
+        # engine's error and completion branches read the run state merged in
+        # below (run_status_for_alerts), and the results fingerprint does NOT
+        # change on an output-less errored run, so a fingerprint-only gate let
+        # the dashboard Alerts panel miss the error (bug audit 2026-11-08,
+        # finding 2). Mirrors the verdict banner's _VERDICT_LAST_RUN_STATE
+        # bypass; backend-status stays a State so its every-tick churn does not
+        # defeat the gate.
+        st = status or {}
+        run_state_now = (
+            "ACTIVE" if st.get("running")
+            else "ERROR" if st.get("pipeline_status") == "error"
+            else "COMPLETE" if st.get("completed")
+            else "STOPPED" if st.get("stopped_run")
+            else "STANDBY"
+        )
+        state_changed = _ALERTS_LAST_RUN_STATE.get("v") != run_state_now
+        if (not state_changed
+                and interval_tick_is_redundant(
+                    ctx, "dashboard_overall_status", _fingerprint)):
             raise PreventUpdate
         mark_rendered("dashboard_overall_status", _fingerprint)
+        _ALERTS_LAST_RUN_STATE["v"] = run_state_now
 
         should_load, main_dir = _should_load_data(config, status, available_samples)
         if not should_load:
