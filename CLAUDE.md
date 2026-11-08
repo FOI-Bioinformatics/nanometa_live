@@ -405,6 +405,17 @@ in `tests/test_sunburst_tax_levels.py`.
 
 Coverage uses cols 5/6 (tname/tlen), 7/8 (tstart/tend), 11 (mapq).
 
+**`paf_breadth` is computed per target, not pooled.** The lightweight coverage
+summary that feeds the Validation tab's CONFIRMED-vs-PARTIAL grading
+(`ValidationResult.determine_status`, the `genome_breadth < 0.05` downgrade, and
+`is_concentrated`) groups intervals by target name (`parts[5]`), sums each
+contig's merged covered length and divides by the summed per-contig reference
+lengths. Pooling every contig into one coordinate space and dividing by the
+longest `tlen` (the pre-2026-11-08 behaviour) over-counts a multi-contig
+reference and can exceed 1.0; it also disagreed with the heavy `parse_paf_coverage`
+path, which already separates by reference. Keep the two in step. Regression-
+covered in `tests/test_paf_parser.py::TestPafBreadthPerContig`.
+
 ### nanometanf Output Layout
 
 ```
@@ -562,7 +573,13 @@ rather than reimplementing the loop.
 path-bearing key whose value is set but does not exist on disk. A
 startup callback (`warn_about_missing_paths_on_startup` in
 `app/callbacks.py`) emits a single combined toast on app load so the
-operator sees the stale path without having to read the terminal log.
+operator sees the stale path without having to read the terminal log. It skips
+the same sentinels `normalise_path` preserves — `remote:`, `http(s)://`, `git@`,
+and the bundle-relative `./` / `../` prefixes — so a config whose
+`pipeline_source` is `./pipeline_source` is not `os.path.exists`-checked against
+the working directory and raises no spurious missing-path toast at startup.
+Regression-covered in
+`tests/test_path_utils.py::TestReportMissingPaths`.
 
 `core/utils/kraken_utils.py` is the single source of truth for "is
 this a valid Kraken2 database?". `KRAKEN_REQUIRED_FILES` lists the
@@ -977,6 +994,23 @@ Two validation sub-tabs:
 - **BLAST** — read-centric: identity scores, distribution plot, stats table
 - **Minimap2/Coverage** — genome-centric: depth chart, cumulative curve, histogram, mapq filter
 
+**The Organisms-tab inline BLAST badge matches on the db taxid, then the NCBI
+taxid.** `validation_loaders._load_blast_validation_data_uncached` is the loader
+behind the per-organism badge, distinct from the Validation tab's
+`ValidationParser`. On a flextaxd/GTDB build nanometanf names the per-read BLAST
+files and keys the Kraken2 report by the grafted *db* taxid (e.g. *B. anthracis*
+`Bacillus_A anthracis` at 4005020, not NCBI 1392), and the organism card looks
+the result up by that same db taxid. Matching on the NCBI taxid alone made the
+badge read `no_data`/0% for exactly the grafted select agents even when
+confirmatory BLAST ran. `_candidate_taxids(entry)` returns `[db_taxid, taxid]`
+and the loader tries both across the canonical, aggregate and on-disk tiers,
+storing the result under every candidate id so the consumer's db-taxid lookup
+resolves; `main_tab` forwards `db_taxid` from the watchlist store. On an NCBI
+database `db_taxid` is unset and behaviour is unchanged. This is the same
+NCBI-vs-db-taxid hazard `attribution.samples_for_detection` already guards.
+Regression-covered in
+`tests/test_validation_loaders.py::TestFlextaxdDbTaxidMatch`.
+
 **Result-loading priority** (`ValidationParser.get_validation_results`): the
 aggregate `validation/validation_results.json` is authoritative for the
 `(sample, taxid, method)` tuples it lists, but it does **not** short-circuit the
@@ -1049,6 +1083,16 @@ nothing, and a successful run was reported as failed. Every failure path
 writes the command, cwd and stdout/stderr to `<results>/logs/` via
 `write_failure_log`, because the launcher runs in a background worker whose
 logger output reaches no file.
+
+**The env build is inside the failed-result path, not above it.**
+`NextflowManager._build_nextflow_env` `raise`s `RuntimeError` in offline mode
+when a configured conda cache is missing (a moved or not-yet-restored bundle).
+That call must stay wrapped so the `RuntimeError` becomes a `write_failure_log`
+plus a `None` return, which `validate_organism` turns into a
+`_create_failed_result` with the actionable message — never an unhandled
+exception in the background worker. It used to sit outside the `try`, and
+`RuntimeError` is not in the except tuple. Regression-covered in
+`tests/test_on_demand_validator_offline_env.py::TestEnvBuildFailureIsCleanResult`.
 
 Genome list `<outdir>/on_demand_validation/pathogen_genomes.json` is cumulative
 across calls (atomic `.replace()`), seeded on first call from the main run's
@@ -1429,6 +1473,21 @@ at the empty initial layout because the fingerprint never advances
 again. The 2-second `should_skip_update("...")` debouncer or the
 `get_trigger_type(ctx) == "interval"` guard keeps the new Input from
 multiplying work — the backstop fires at most once per tick.
+
+**The Alerts status cache bypasses its redundant-interval gate on a run-state
+change.** `compute_overall_status_cache` (`dashboard_tab.py`) takes
+`results-fingerprint` + `update-interval` as Inputs with `backend-status` as
+State and normally short-circuits a redundant tick via
+`interval_tick_is_redundant`. A run that errors without writing to the watched
+data subdirs does not change the fingerprint, so without a bypass the cache
+never re-ran `run_status_for_alerts` with the error state and the alert panel's
+error/completion branch saw a healthy run. A module `_ALERTS_LAST_RUN_STATE`
+tracks the last rendered run state and skips the short-circuit when it changed
+(ACTIVE / ERROR / COMPLETE / STOPPED / STANDBY), mirroring the verdict banner's
+`_VERDICT_LAST_RUN_STATE`. Keep `backend-status` a State, not an Input, so its
+per-tick churn does not defeat the redundant-interval debounce. Regression-
+covered in
+`tests/test_dashboard_tab_callbacks.py::TestStatusCacheRecomputesOnRunStateChange`.
 
 **A verdict must never claim a result it did not earn.** Three of the defects
 found in the 2026-07 campaign were one defect: the system rendering "we did not
