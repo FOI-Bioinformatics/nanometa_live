@@ -253,3 +253,47 @@ def test_quality_card_empty_does_not_raise(dash_app):
     with ctx_trigger("results-fingerprint"):
         result = fn("fp", {}, {})
     assert result is not None
+
+
+class TestStatusCacheRecomputesOnRunStateChange:
+    """Bug audit 2026-11-08, finding 2: an output-less errored run does not
+    change the results fingerprint, so a fingerprint-only redundant-interval
+    gate never recomputed the status cache and the dashboard Alerts panel
+    missed the error. A run-state change now bypasses the gate, mirroring the
+    verdict banner's _VERDICT_LAST_RUN_STATE bypass."""
+
+    FP = "fp-runstate-f2"
+
+    def _fn(self, dash_app):
+        return get_callback_fn(dash_app, "dashboard-overall-status-cache")
+
+    def test_error_transition_recomputes_without_a_fingerprint_change(
+            self, dash_app, populated_dir):
+        dash_mod._ALERTS_LAST_RUN_STATE.clear()
+        fn = self._fn(dash_app)
+        cfg = {"results_output_directory": populated_dir}
+
+        # Tick 1: running. First render of this fingerprint -> proceeds.
+        with ctx_trigger("update-interval"):
+            first = fn(self.FP, 1, cfg, {"running": True, "errors": []},
+                       ["All Samples"])
+        assert isinstance(first, dict)
+        assert first["error_count"] == 0
+
+        # Tick 2: still running, same fingerprint, interval trigger -> the gate
+        # still debounces a genuinely redundant refresh.
+        with ctx_trigger("update-interval"):
+            with pytest.raises(PreventUpdate):
+                fn(self.FP, 2, cfg, {"running": True, "errors": []},
+                   ["All Samples"])
+
+        # Tick 3: the run errored with no new output (same fingerprint). The
+        # run-state change (ACTIVE -> ERROR) must bypass the gate so the error
+        # reaches the alert engine.
+        with ctx_trigger("update-interval"):
+            errored = fn(self.FP, 3, cfg,
+                         {"running": False, "completed": False,
+                          "pipeline_status": "error", "errors": ["boom"]},
+                         ["All Samples"])
+        assert isinstance(errored, dict), "error transition must recompute the cache"
+        assert errored["error_count"] == 1
