@@ -396,7 +396,8 @@ def register_main_callbacks(app: Dash):
         # get_watchlist_manager(). The store data shape mirrors the prior
         # singleton output, so downstream code is unchanged.
         watchlist = [
-            {"taxid": e.get("taxid"), "name": e.get("name")}
+            {"taxid": e.get("taxid"), "name": e.get("name"),
+             "db_taxid": e.get("db_taxid")}
             for e in (watchlist_store or [])
             if e.get("taxid") is not None and e.get("name")
         ]

@@ -916,7 +916,7 @@ def _validation_params(config: Dict[str, Any], run_validation_enabled: bool,
     blast_perc_identity as integer; a typed decimal (92.5) passed local
     validation and failed at launch.
 
-    ``min_reads_for_validation`` (default 50) is a CUMULATIVE reporting
+    ``min_reads_for_validation`` (default 10) is a CUMULATIVE reporting
     threshold applied in the GUI/aggregation layer and is deliberately NOT
     forwarded to nanometanf's per-batch pre-extraction gate
     (``min_batch_reads_for_validation``): gating per batch on a cumulative

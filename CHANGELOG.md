@@ -6,6 +6,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Organisms-tab inline BLAST validation badge resolves on GTDB/flextaxd
+  databases.** `validation_loaders._load_blast_validation_data_uncached`
+  matched each watched organism by its NCBI taxid only, while on a flextaxd
+  build nanometanf names the per-read BLAST files and keys the Kraken2 report
+  by the grafted *db* taxid (e.g. *B. anthracis* `Bacillus_A anthracis` at
+  4005020, not 1392), and the organism card looks the result up by that same
+  db taxid. The badge therefore read `no_data`/0% for exactly the grafted
+  select agents even when confirmatory BLAST ran. The loader now matches on
+  the db taxid then the NCBI taxid (`_candidate_taxids`) across all three
+  tiers and stores the result under both ids; `main_tab` forwards `db_taxid`
+  from the watchlist store. On an NCBI database `db_taxid` is unset and the
+  behaviour is unchanged. Pinned in
+  `tests/test_validation_loaders.py::TestFlextaxdDbTaxidMatch`.
+
+- **`paf_breadth` computes genome breadth per reference sequence.** The
+  lightweight coverage summary that feeds the Validation tab's
+  CONFIRMED-vs-PARTIAL grading pooled every contig's intervals into one
+  coordinate space and divided by the longest contig, so a multi-contig
+  reference (chromosome + plasmids, or a draft assembly) over-counted breadth
+  and could exceed 1.0. It now merges intervals per target name and divides by
+  the summed length of the contigs seen, matching `parse_paf_coverage`. Pinned
+  in `tests/test_paf_parser.py::TestPafBreadthPerContig`.
+
+- **Doc:** `parameter_mapping._validation_params` docstring said
+  `min_reads_for_validation` defaults to 50; the real default is 10.
+
 ### Added
 
 - **`nanometa-prepare doctor` row "nf-schema plugin".** nanometanf pins an
