@@ -464,10 +464,17 @@ class OnDemandValidator:
         # I/O can need more than the historical hardcoded 30 minutes.
         timeout_seconds = _validation_timeout_seconds(config)
 
-        # Every offline guarantee lives in this env (NXF_OFFLINE, the
-        # plugin path, the container cache dirs); launching without it
-        # reached the registries on an air-gapped machine.
-        env = NextflowManager._build_nextflow_env(config)
+        # Every offline guarantee lives in this env; _build_nextflow_env
+        # RAISES (offline + missing conda cache). That RuntimeError is not in
+        # the except tuple below, so wrap the build to return None -> the clean
+        # failed result instead of an escaped exception; the actionable message
+        # rides the failure log (bug audit 2026-11-08, finding 3).
+        try:
+            env = NextflowManager._build_nextflow_env(config)
+        except RuntimeError as exc:
+            write_failure_log(self.results_dir, cmd, launch_dir,
+                              f"environment setup failed: {exc}\n")
+            return None
 
         try:
             logger.info(f"Running nanometanf validation: {' '.join(cmd)}")
