@@ -195,6 +195,7 @@
     "nanometa_live/core/workflow/nextflow_manager.py::NextflowManager.setup",
     "nanometa_live/core/workflow/nextflow_manager.py::NextflowManager.start",
     "nanometa_live/core/workflow/nextflow_manager.py::NextflowManager.validate_pipeline_source",
+    "nanometa_live/core/workflow/on_demand_validator.py",
     "nanometa_live/core/workflow/on_demand_validator.py::OnDemandValidator.validate_via_nanometanf",
     "nanometa_live/core/workflow/readiness_checker.py",
     "nanometa_live/core/workflow/readiness_checker.py::ReadinessChecker.check_readiness",
