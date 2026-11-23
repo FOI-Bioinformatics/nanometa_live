@@ -396,6 +396,20 @@ out reparents to its nearest still-present ancestor (or `root`) via
 `_resolve_sunburst_parent`, so capping never orphans a node. Regression-covered
 in `tests/test_sunburst_tax_levels.py`.
 
+**Taxonomy charts share one selection rule (2026-11-24 live test).** Both
+the Sankey and the Sunburst hang a taxon from its NEAREST DISPLAYED ancestor
+(`_nearest_displayed_ancestor`), never from "the ancestor exactly one
+selected level up": that rule dropped Bacteria under the Overview preset
+(no Kingdom rank) and every taxon whose parent was capped out. Watched
+organisms (`protected_taxa`, from `classification_tab._watched_taxa`) and
+their ancestors are exempt from the per-level cap and the min-reads filter.
+Colour is by lineage (`_lineage_colors`, `LINEAGE_PALETTE`, validated with
+the dataviz validator; red is reserved for watched taxa). **plotly.js draws
+no per-node outline in a Sankey**: an array for `node.line.color` renders a
+black stroke on every node, so a watched Sankey node is FILLED with
+`WATCHED_COLOR`; only the Sunburst takes per-sector `marker.line` arrays.
+Pinned in `tests/test_taxonomy_charts_structure.py`.
+
 ### PAF Files (minimap2 validation)
 
 ```

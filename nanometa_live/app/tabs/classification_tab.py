@@ -37,6 +37,42 @@ from nanometa_live.app.tabs.classification_helpers import (
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 
 
+#: Levels the charts can draw, broadest first. "S1" (subspecies / strain)
+#: is offered by the level checklist and the Subspecies Focus preset; the
+#: order the callback filtered against had no "S1", so selecting it did
+#: nothing (live test 2026-11-24).
+CHART_LEVEL_ORDER = ["D", "K", "P", "C", "O", "F", "G", "S", "S1"]
+
+
+def _watched_taxa(kraken_df):
+    """{kraken taxid: 'name (threat level)'} for watched organisms in the report.
+
+    Same matching as the Organisms tab's watched list (taxid, database
+    taxid mapping, name). Used to keep watched organisms on the charts and
+    outline them; an empty dict when nothing is watched or matching fails.
+    """
+    try:
+        from nanometa_live.app.tabs.main_tab_helpers import filter_detected_species
+        from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
+
+        detected = filter_detected_species(kraken_df, [])
+        if not detected:
+            return {}
+        by_ncbi = {}
+        for entry in get_watchlist_manager().get_active_entries().values():
+            by_ncbi.setdefault(entry.taxid, entry)
+        out = {}
+        for row in detected:
+            entry = by_ncbi.get(row.get("ncbi_taxid")) or by_ncbi.get(row.get("taxid"))
+            level = getattr(getattr(entry, "threat_level", None), "value", None)
+            name = getattr(entry, "name", None) or str(row.get("name", "")).strip()
+            out[int(row["taxid"])] = f"{name} ({level})" if level else name
+        return out
+    except Exception as e:  # noqa: BLE001 - a highlight must never break the chart
+        logging.debug("watched-taxa lookup failed: %s", e)
+        return {}
+
+
 def register_classification_callbacks(app: Dash):
     """
     Register callbacks for the unified Classification tab.
@@ -160,6 +196,9 @@ def register_classification_callbacks(app: Dash):
             Input("classification-color-scheme", "value"),  # Color scheme selection
             Input("classification-max-taxa", "value"),  # Max taxa per level filter
             Input("classification-chart-height", "value"),  # Chart height control
+            # Domains redraw at once, like levels and presets; as a State
+            # they waited for the Apply button beside the min-reads box.
+            Input("classification-domains-input", "value"),
             # Programmatic min-reads rescale (see scale_min_reads_default). The
             # filter input itself stays a State so manual edits still wait for
             # Apply; only the auto-scaled floor forces a re-render.
@@ -172,7 +211,6 @@ def register_classification_callbacks(app: Dash):
         ],
         [
             State("classification-filter-input", "value"),
-            State("classification-domains-input", "value"),
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
@@ -187,11 +225,11 @@ def register_classification_callbacks(app: Dash):
         color_scheme,     # Color scheme selection
         max_taxa_value,   # Max taxa per level filter
         chart_height,     # Chart height control
+        domains,          # Life domains (Input: redraws at once)
         _autoscale,       # Programmatic min-reads rescale
         _n_intervals,     # Polling backstop
         active_tab,       # Tab-aware rendering gate
         filter_value,     # State
-        domains,          # State
         config,
         status,
     ):
@@ -258,20 +296,11 @@ def register_classification_callbacks(app: Dash):
         if max_taxa == 0:
             max_taxa = 9999  # Effectively no limit
 
-        # Get taxonomy levels with defaults
-        # Canonical ordering includes K (Kingdom) between D and P
-        canonical_order = ["D", "K", "P", "C", "O", "F", "G", "S"]
-        all_tax_levels = config.get(
-            "taxonomic_hierarchy_letters", ["D", "P", "C", "O", "F", "G", "S"]
-        )
-        # Ensure K is always in the allowed set so user can select it even if config omits it
-        if "K" not in all_tax_levels:
-            all_tax_levels = canonical_order
         if not tax_levels:
             tax_levels = config.get("default_hierarchy_letters", ["D", "C", "G", "S"])
 
-        # Keep only valid taxonomy levels in canonical order
-        tax_levels = [level for level in canonical_order if level in tax_levels]
+        # Keep only valid taxonomy levels, broadest first
+        tax_levels = [level for level in CHART_LEVEL_ORDER if level in tax_levels]
 
         try:
             # Load Kraken2 data (per-sample or aggregated)
@@ -291,17 +320,28 @@ def register_classification_callbacks(app: Dash):
                 if taxonomy:
                     kraken_df = apply_authoritative_taxonomy(kraken_df, taxonomy)
 
-            # Get the selected color palette (default to tableau)
+            # Colour: "lineage" (default) colours by branch; the named
+            # palettes colour by rank, as before.
+            color_mode = "lineage" if (color_scheme or "lineage") == "lineage" else "rank"
             color_palette = COLOR_SCHEMES.get(color_scheme or "tableau", COLORS_TABLEAU)
+            # Watched organisms stay on the chart whatever the filters and
+            # are outlined; a select agent at 100 reads vanished under the
+            # auto-scaled floor of 120 reads.
+            protected = _watched_taxa(kraken_df)
 
             # Generate visualization based on type
             if view_type == "sunburst":
-                figure = create_sunburst_data(kraken_df, domains, tax_levels, filter_value, config, color_palette, max_taxa_per_level=max_taxa)
+                figure = create_sunburst_data(
+                    kraken_df, domains, tax_levels, filter_value, config, color_palette,
+                    max_taxa_per_level=max_taxa, chart_height=chart_height,
+                    color_mode=color_mode, protected_taxa=protected)
                 if figure is None:
                     return create_empty_sunburst("No data matches the selected filters"), None, graph_visible
                 return figure, None, graph_visible
             else:  # sankey
-                figure = create_sankey_data(kraken_df, domains, tax_levels, filter_value, max_taxa, chart_height, color_palette)
+                figure = create_sankey_data(
+                    kraken_df, domains, tax_levels, filter_value, max_taxa, chart_height,
+                    color_palette, color_mode=color_mode, protected_taxa=protected)
                 if figure is None:
                     return create_placeholder_sankey("No data matches the selected filters"), None, graph_visible
                 return figure, None, graph_visible

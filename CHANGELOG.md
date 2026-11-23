@@ -615,8 +615,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   nests in family (`i//10`) nests in order (`i//20`), with a single consistent
   (phylum, class) pair per order.
 
+- The Taxonomy charts draw every lineage. The Sankey linked a taxon only
+  to an ancestor exactly one selected level up, so a lineage without that
+  rank (Bacteria and Archaea have no Kingdom) or a taxon whose parent was
+  capped out lost its links and was dropped: with the Overview preset
+  Bacteria, 98% of the reads, vanished, and at the default cap of 10 a
+  28,806-read F. tularensis was missing while the Sunburst showed it. Both
+  charts now hang a taxon from its nearest displayed ancestor.
+- The Subspecies Focus preset and the Subspecies level draw subspecies; the
+  callback's level order had no "S1". The Life Domains selection redraws at
+  once instead of waiting for the min-reads Apply button.
+- Watched organisms stay on both charts whatever the cap and minimum-reads
+  filter, with their lineage, and are marked: a warning glyph on the label,
+  a hover line naming the watchlist entry and threat level, a red outline in
+  the Sunburst and a red node in the Sankey.
+
 ### Changed
 
+- The Taxonomy charts colour by lineage by default: each top-level branch
+  below Kingdom keeps one hue through every column or ring, so a branch can
+  be followed across the chart (rank is already given by position). The
+  seven hues are a validated colour-blind-safe set; further lineages are
+  grey and red is reserved for watched organisms. The rank palettes remain
+  under "Color by". Both charts share one title with a caption giving the
+  read total, the unclassified share and how many taxa the filters hide;
+  the Sunburst root is "Classified reads" with its share of all reads, its
+  labels fit any orientation with ink chosen for contrast per sector, and it
+  follows the Chart Height setting. The Sankey uses the full width, gives
+  each node's share of its parent in the hover, and abbreviates a genus
+  already drawn beside a species label ("E. coli").
 - The PyPI upload is off by default: the publish workflow builds the
   distribution on every release and uploads only when the repository
   variable `PUBLISH_TO_PYPI` is `true`. The user guide installs from the
