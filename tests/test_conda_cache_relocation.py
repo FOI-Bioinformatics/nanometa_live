@@ -375,3 +375,88 @@ class TestMachOResigning:
             "an unsigned patched Mach-O will be SIGKILLed at exec; the "
             "operator must be told"
         )
+
+
+class TestByteCompiledModules:
+    """A .pyc is marshal data, not a C string table (field audit 2026-10-28, C1).
+
+    Conda byte-compiles every noarch package with the env's absolute prefix,
+    so each .pyc carries the padded build path in ``co_filename``. The
+    NUL-padded binary rewrite shifted the bytes after the path and broke the
+    marshal stream while ``relocate_conda_cache`` reported zero failures; on
+    an air-gapped machine every Python-based pipeline process then failed at
+    first import. The contract: a .pyc carrying the old prefix is removed, the
+    module still imports (Python regenerates the file from source), and the
+    removal is counted.
+    """
+
+    OLD_ROOT_NAME = "conda_cache_build_" + "p" * 180
+
+    def _env_with_compiled_module(self, tmp_path):
+        import py_compile
+
+        old_root = tmp_path / self.OLD_ROOT_NAME
+        site = old_root / "env-abc" / "lib" / "python3.12" / "site-packages"
+        site.mkdir(parents=True)
+        src = site / "relocmod.py"
+        src.write_text("def hello():\n    return 'relocated'\n")
+        pyc = site / "__pycache__" / "relocmod.cpython-312.pyc"
+        # dfile is what conda records: the absolute install-time path.
+        py_compile.compile(str(src), cfile=str(pyc), dfile=str(src))
+        assert str(old_root).encode() in pyc.read_bytes()
+        return old_root, site, pyc
+
+    def test_pyc_carrying_build_prefix_is_removed_not_patched(self, tmp_path):
+        import shutil
+
+        from nanometa_live.core.workflow import conda_cache_utils as ccu
+
+        old_root, _site, _pyc = self._env_with_compiled_module(tmp_path)
+        new_root = tmp_path / "restored"
+        shutil.move(str(old_root), str(new_root))
+        stats = ccu.relocate_conda_cache(new_root, str(old_root))
+
+        pyc = (new_root / "env-abc" / "lib" / "python3.12" / "site-packages"
+               / "__pycache__" / "relocmod.cpython-312.pyc")
+        assert not pyc.exists(), "a prefix-bearing .pyc must be deleted"
+        assert stats["pyc_removed"] == 1
+        assert stats["binary_patched"] == 0, (
+            "the NUL-padded rewrite corrupts marshal data; it must not run on .pyc"
+        )
+        assert stats["failures"] == []
+
+    def test_module_imports_after_relocation(self, tmp_path):
+        import shutil
+        import subprocess
+        import sys
+
+        from nanometa_live.core.workflow import conda_cache_utils as ccu
+
+        old_root, _site, _pyc = self._env_with_compiled_module(tmp_path)
+        new_root = tmp_path / "restored"
+        shutil.move(str(old_root), str(new_root))
+        ccu.relocate_conda_cache(new_root, str(old_root))
+
+        site = new_root / "env-abc" / "lib" / "python3.12" / "site-packages"
+        # A fresh interpreter, as the pipeline's tools would start: the only
+        # thing on the path is the relocated site-packages.
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c",
+             "import sys; sys.path.insert(0, sys.argv[1]); "
+             "import relocmod; print(relocmod.hello())", str(site)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip() == "relocated"
+
+    def test_pyc_without_build_prefix_is_left_alone(self, tmp_path):
+        from nanometa_live.core.workflow import conda_cache_utils as ccu
+
+        cache = tmp_path / "cache"
+        pycache = cache / "env-abc" / "lib" / "__pycache__"
+        pycache.mkdir(parents=True)
+        pyc = pycache / "clean.cpython-312.pyc"
+        pyc.write_bytes(b"\xcb\r\r\n" + b"\x00" * 12 + b"no prefix here")
+        stats = ccu.relocate_conda_cache(cache, "/some/old/prefix_" + "x" * 160)
+        assert pyc.exists()
+        assert stats["pyc_removed"] == 0

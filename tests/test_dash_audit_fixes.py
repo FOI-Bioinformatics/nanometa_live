@@ -224,7 +224,9 @@ class TestOptimisticStartTimeIsIso:
         backend.transition_in_progress.return_value = False
         backend.start_async.return_value = (True, "Starting")
         fn = get_callback_fn(app, "collision-decision-pending.data")
-        result = fn(1, {"results_dir_override": "/out"}, {"running": False})
+        ready = {"ready": True, "checks": [
+            {"name": "Kraken2 Database", "passed": True, "severity": "critical", "message": "ok"}]}
+        result = fn(1, {"results_dir_override": "/out"}, {"running": False}, ready)
         start_time = result[-1]["start_time"]
         assert isinstance(start_time, str)
         assert datetime.fromisoformat(start_time)  # parses, does not raise
@@ -251,7 +253,9 @@ class TestOptimisticStartTimeIsIso:
         backend.transition_in_progress.return_value = False
         backend.start_async.return_value = (True, "ok")
         fn = get_callback_fn(app, "collision-decision-pending.data")
-        status = fn(1, {"results_dir_override": "/out"}, {"running": False})[-1]
+        ready = {"ready": True, "checks": [
+            {"name": "Kraken2 Database", "passed": True, "severity": "critical", "message": "ok"}]}
+        status = fn(1, {"results_dir_override": "/out"}, {"running": False}, ready)[-1]
 
         assert _format_time_elapsed(status["start_time"]) != "00:00:00" or True
         # Stronger: a float would have hit the except branch and returned the

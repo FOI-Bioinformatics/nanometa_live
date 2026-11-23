@@ -517,14 +517,16 @@ def register_navigation(app, backend_manager):
 
         The existing start_or_prompt_stop callback gates on
         start-stop-button.n_clicks: bumping that count from here
-        triggers exactly the same readiness check, collision-modal,
-        and backend-launch flow as if the operator had clicked the
-        header button. Keeping the launch logic single-sourced
-        avoids accidental drift between the two CTAs.
+        runs the same server-side readiness gate (readiness_blocks_start,
+        which that callback applies on every click since the 2026-10-28
+        field audit; before it, this proxy walked past the header
+        button's disabled attribute and nothing else checked),
+        collision-modal, and backend-launch flow as if the operator had
+        clicked the header button. Keeping the launch logic
+        single-sourced avoids accidental drift between the two CTAs.
 
-        Only while the header button would itself act as Start: bumping the
-        n_clicks of a DISABLED button (visualization-only mode, failed
-        readiness) got around the disable, and during a run the header
+        Only while the header button would itself act as Start: it is also
+        disabled in visualization-only mode, and during a run the header
         button is Stop, so a click labelled Start opened the stop prompt.
         """
         if not n_prep:

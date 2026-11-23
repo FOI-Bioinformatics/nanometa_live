@@ -44,6 +44,25 @@ class TestUnresolvedWatchlistIds:
         assert wm.unresolved_watchlist_ids(
             {"watchlist": {"enabled": False, "builtin": ["bioshield_agents"]}}) == {}
 
+    def test_a_block_without_enabled_is_still_checked(self, isolated_loader):
+        """The loader defaults ``enabled`` to True; this check must agree.
+
+        A config naming a list without saying ``enabled: true`` loads from
+        that list (``_load_config_locked`` reads ``.get("enabled", True)``),
+        so a missing file breaks the run exactly as it does for an explicit
+        block. Defaulting False here made both the CRITICAL readiness row and
+        the startup toast silent about it (audit 2026-11-06, finding 19).
+        """
+        missing = wm.unresolved_watchlist_ids(
+            {"watchlist": {"builtin": ["bioshield_agents"]}})
+        assert list(missing) == ["bioshield_agents"]
+
+    def test_readiness_sees_it_too(self, isolated_loader):
+        result = ReadinessChecker()._check_watchlist_names_resolve(
+            {"watchlist": {"builtin": ["bioshield_agents"]}})
+        assert result.passed is False
+        assert result.severity == Severity.CRITICAL
+
     def test_no_watchlist_block(self, isolated_loader):
         assert wm.unresolved_watchlist_ids({}) == {}
         assert wm.unresolved_watchlist_ids(None) == {}

@@ -40,9 +40,10 @@ def register_start_stop(app, backend_manager):
         Input("start-stop-button", "n_clicks"),
         State("app-config", "data"),
         State("backend-status", "data"),
+        State("readiness-state", "data"),
         prevent_initial_call=True,
     )
-    def start_or_prompt_stop(n_clicks, config, status):
+    def start_or_prompt_stop(n_clicks, config, status, readiness=None):
         """Start analysis, prompt to stop, or warn about output collision.
 
         When the user clicks Start with a results dir that already
@@ -50,10 +51,20 @@ def register_start_stop(app, backend_manager):
         modal instead of starting the run. The actual run is then
         triggered by handle_collision_choice based on which button the
         user picks.
+
+        The readiness checklist is read HERE, on the server, on every
+        click. The header button's disabled attribute is a courtesy that
+        the Preparation tab's proxy button and a stale Store both walk
+        past; a run that fails a CRITICAL check is refused with the rows
+        named (field audit 2026-10-28, H5).
         """
         from nanometa_live.app.utils.config_manager import merge_config_safely
         from nanometa_live.app.components.collision_modal import (
             render_collision_body,
+        )
+        from nanometa_live.app.utils.start_gate import (
+            readiness_blocks_start,
+            refusal_message,
         )
 
         if not n_clicks:
@@ -69,6 +80,23 @@ def register_start_stop(app, backend_manager):
                     "title": "Error",
                     "message": "No configuration loaded. Please load or configure settings first.",
                     "color": "danger",
+                },
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+            )
+
+        blockers = readiness_blocks_start(readiness, config)
+        if blockers:
+            return (
+                {
+                    "title": "Not ready to start",
+                    "message": refusal_message(blockers),
+                    "color": "danger",
+                    "navigate_to": "watchlist-tab",
                 },
                 no_update,
                 no_update,

@@ -15,7 +15,7 @@ import os
 import random
 import json
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 # Comprehensive organism database (100+ organisms)
 EXTENDED_ORGANISM_DB = [
@@ -62,13 +62,49 @@ EXTENDED_ORGANISM_DB = [
     {"taxid": 286, "name": "Pseudomonas syringae", "genus": "Pseudomonas", "family": "Pseudomonadaceae", "order": "Pseudomonadales", "class": "Gammaproteobacteria", "phylum": "Proteobacteria"},
     # Add 70+ more diverse organisms
 ] + [
-    # Generate synthetic organisms to reach 100+ total
-    {"taxid": 10000 + i, "name": f"Synthetic_species_{i:03d}", "genus": f"Synthetic_genus_{i//10:02d}",
-     "family": f"Synthetic_family_{i//20:02d}", "order": f"Synthetic_order_{i//30:02d}",
-     "class": ["Gammaproteobacteria", "Bacilli", "Bacteroidia", "Actinomycetia"][i % 4],
-     "phylum": ["Proteobacteria", "Firmicutes", "Bacteroidetes", "Actinobacteria"][i % 4]}
+    # Generate synthetic organisms to reach 100+ total.
+    #
+    # The ranks must nest as a strict tree: every coarser rank is a clean union
+    # of the finer ranks beneath it, and each node has exactly one parent. The
+    # earlier definition grouped genus by i//10, family by i//20 and order by
+    # i//30 (boundaries that do not nest -- 30 is not a multiple of 20), and set
+    # class/phylum from i%4, so a single synthetic genus was placed under four
+    # different phyla. Per-barcode reports hid this (each subtree is emitted
+    # depth-first), but the "All Samples" aggregate orders nodes by taxid and
+    # cannot represent a non-tree, producing invalid indentation jumps. Here
+    # genus (//5) nests in family (//10) nests in order (//20), and (phylum,
+    # class) is one consistent pair chosen by the order, so the taxonomy is a
+    # valid tree regardless of which species the random draw selects.
+    {"taxid": 10000 + i, "name": f"Synthetic_species_{i:03d}",
+     "genus": f"Synthetic_genus_{i//5:02d}",
+     "family": f"Synthetic_family_{i//10:02d}",
+     "order": f"Synthetic_order_{i//20:02d}",
+     "class": ["Gammaproteobacteria", "Bacilli", "Bacteroidia", "Actinomycetia"][i // 20],
+     "phylum": ["Proteobacteria", "Firmicutes", "Bacteroidetes", "Actinobacteria"][i // 20]}
     for i in range(70)
 ]
+
+
+# Intermediate-rank (D/P/C/O/F/G) taxids must be stable, unique, and must never
+# collide with a species taxid or with each other. The earlier code used
+# ``hash(name) % 90000 + 1000``, but CPython randomises str hashing per process
+# (PYTHONHASHSEED), so two intermediate nodes could land on the same taxid; the
+# loader aggregates rows by taxid and would then silently drop one, leaving a
+# species directly under its family (an invalid hierarchy). Draw ids from a
+# reserved high block instead, keyed by (rank, name), so the tree is valid by
+# construction regardless of PYTHONHASHSEED or the random species draw.
+_INTERMEDIATE_TAXID_BASE = 1_000_000
+_intermediate_taxids: Dict[Tuple[str, str], int] = {}
+
+
+def _rank_taxid(rank: str, name: str) -> int:
+    """Return a stable, unique, collision-free taxid for an intermediate rank node."""
+    key = (rank, name)
+    taxid = _intermediate_taxids.get(key)
+    if taxid is None:
+        taxid = _INTERMEDIATE_TAXID_BASE + len(_intermediate_taxids)
+        _intermediate_taxids[key] = taxid
+    return taxid
 
 
 def generate_kraken_report(species_list: List[Dict], total_reads: int, unclassified_pct: float = 0.15) -> List[str]:
@@ -135,23 +171,23 @@ def generate_kraken_report(species_list: List[Dict], total_reads: int, unclassif
     # Group by phylum, class, order, family, genus
     for phylum in sorted(set(s["phylum"] for s in species_list)):
         phylum_species = [s for s in species_list if s["phylum"] == phylum]
-        lines.append(f"{(phylum_reads[phylum]/total_reads)*100:.2f}\t{phylum_reads[phylum]}\t0\tP\t{hash(phylum) % 90000 + 1000}\t    {phylum}")
+        lines.append(f"{(phylum_reads[phylum]/total_reads)*100:.2f}\t{phylum_reads[phylum]}\t0\tP\t{_rank_taxid('P', phylum)}\t    {phylum}")
 
         for class_name in sorted(set(s["class"] for s in phylum_species)):
             class_species = [s for s in phylum_species if s["class"] == class_name]
-            lines.append(f"{(class_reads[class_name]/total_reads)*100:.2f}\t{class_reads[class_name]}\t0\tC\t{hash(class_name) % 90000 + 1000}\t      {class_name}")
+            lines.append(f"{(class_reads[class_name]/total_reads)*100:.2f}\t{class_reads[class_name]}\t0\tC\t{_rank_taxid('C', class_name)}\t      {class_name}")
 
             for order in sorted(set(s["order"] for s in class_species)):
                 order_species = [s for s in class_species if s["order"] == order]
-                lines.append(f"{(order_reads[order]/total_reads)*100:.2f}\t{order_reads[order]}\t0\tO\t{hash(order) % 90000 + 1000}\t        {order}")
+                lines.append(f"{(order_reads[order]/total_reads)*100:.2f}\t{order_reads[order]}\t0\tO\t{_rank_taxid('O', order)}\t        {order}")
 
                 for family in sorted(set(s["family"] for s in order_species)):
                     family_species = [s for s in order_species if s["family"] == family]
-                    lines.append(f"{(family_reads[family]/total_reads)*100:.2f}\t{family_reads[family]}\t0\tF\t{hash(family) % 90000 + 1000}\t          {family}")
+                    lines.append(f"{(family_reads[family]/total_reads)*100:.2f}\t{family_reads[family]}\t0\tF\t{_rank_taxid('F', family)}\t          {family}")
 
                     for genus in sorted(set(s["genus"] for s in family_species)):
                         genus_species = [s for s in family_species if s["genus"] == genus]
-                        lines.append(f"{(genus_reads[genus]/total_reads)*100:.2f}\t{genus_reads[genus]}\t0\tG\t{hash(genus) % 90000 + 1000}\t            {genus}")
+                        lines.append(f"{(genus_reads[genus]/total_reads)*100:.2f}\t{genus_reads[genus]}\t0\tG\t{_rank_taxid('G', genus)}\t            {genus}")
 
                         for species in genus_species:
                             reads = species_reads[species["taxid"]]

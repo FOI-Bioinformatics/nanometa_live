@@ -33,6 +33,12 @@ conda activate nanometa
 pip install "nanometa-live @ git+https://github.com/FOI-Bioinformatics/nanometa_live@0.19.0"
 ```
 
+For a field laptop that will run without a network, build the environment
+from `nanometa_live_env.yml` instead: it carries every runtime requirement
+plus Nextflow, Java, BLAST and the NCBI datasets CLI, so nothing is fetched
+later. The [Operator Guide](OPERATOR_GUIDE.md#what-does-not-transfer-install-these-on-the-field-machine-while-it-is-online)
+has the steps and the pre-departure checklist.
+
 ### Install from source
 
 ```bash
@@ -471,7 +477,7 @@ blast_validation: false
 - Verify the results directory contains expected output files
 
 **Pipeline errors:**
-- Verify the conda environment is activated and `nextflow -version` reports 25.10 or newer
+- Verify the conda environment is activated and `nextflow -version` reports 26.04.0 or newer
 - Verify Kraken2 database path is correct
 - Review Nextflow logs in the results directory
 

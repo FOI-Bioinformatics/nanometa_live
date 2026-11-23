@@ -832,6 +832,7 @@ from nanometa_live.app.tabs.verdict_states import (  # noqa: F401
     VerdictDescriptor,
     pipeline_error_descriptor as _pipeline_error_descriptor,
     results_unavailable_descriptor as _results_unavailable_descriptor,
+    results_unreadable_descriptor as _results_unreadable_descriptor,
     with_failure_clauses as _with_failure_clauses,
 )
 
@@ -1115,6 +1116,7 @@ def _data_verdict(
     failed_tasks=0,
     input_layout_mismatch=None,
     batch_progress_clause=None,
+    disk_low=None,
 ) -> VerdictDescriptor:
     """The data-available branch of select_verdict (extracted, still pure).
 
@@ -1125,7 +1127,8 @@ def _data_verdict(
     health = dict(stale_samples=stale_samples, run_stopped=run_stopped,
                   stop_reason=stop_reason, failed_tasks=failed_tasks,
                   input_layout_mismatch=input_layout_mismatch,
-                  batch_progress_clause=batch_progress_clause)
+                  batch_progress_clause=batch_progress_clause,
+                  disk_low=disk_low)
     if dangerous:
         return _with_failure_clauses(
             _detection_descriptor(
@@ -1176,12 +1179,14 @@ def _data_verdict(
 
 
 def _run_health(stale_samples, run_stopped, stop_reason, failed_tasks,
-                input_layout_mismatch, batch_progress_clause=None):
+                input_layout_mismatch, batch_progress_clause=None,
+                disk_low=None):
     """The run-health inputs a data-state verdict carries into its subtitle."""
     return dict(stale_samples=stale_samples, run_stopped=run_stopped,
                 stop_reason=stop_reason, failed_tasks=failed_tasks,
                 input_layout_mismatch=input_layout_mismatch,
-                batch_progress_clause=batch_progress_clause)
+                batch_progress_clause=batch_progress_clause,
+                disk_low=disk_low)
 
 
 def select_verdict(
@@ -1207,30 +1212,19 @@ def select_verdict(
     failed_tasks: int = 0,
     input_layout_mismatch: Optional[str] = None,
     batch_progress_clause: Optional[str] = None,
+    disk_low: Optional[str] = None,
+    load_failed: bool = False,
+    load_error: Optional[str] = None,
 ) -> VerdictDescriptor:
     """Pure decision: pick the verdict banner state from the analysis inputs.
 
-    Mirrors the original update_verdict_banner control flow exactly:
-
-    1. No config -> SCREENING when running, otherwise STANDBY.
-    2. overall_status == "starting" -> SCREENING (takes priority over data).
-    3. Results directory present with Kraken data -> classify the watchlist
-       hits: any critical/high-risk hit -> ACTION REQUIRED; other hits ->
-       MONITORING; no hits -> ALL CLEAR. ``pipeline_error`` outranks every
-       non-hit state in this branch (a dead pipeline must never render as a
-       clean result) but never a hit -- detections and sub-threshold hits
-       keep their state with the failure noted in the subtitle.
-    4. Results directory previously seen but now unreadable
-       (``results_dir_lost``) -> RESULTS UNAVAILABLE; a crashed run with no
-       output (``pipeline_error``) -> PIPELINE ERROR. Both distinct from
-       STANDBY on purpose.
-    5. Results directory present but no data yet and still running -> SCREENING.
-    6. Everything else (no results dir, idle with no data, load failure) ->
-       STANDBY.
-
-    ``stale_samples`` appends a clause to the data-state subtitles so
-    frozen numbers cannot present as live ones; ``run_stopped`` does the
-    same for a run ended before its input was exhausted (round-4 H2).
+    Precedence: no config -> SCREENING/STANDBY; starting -> SCREENING (a
+    dead pipeline outranks it); data present -> ``_data_verdict`` (a hit
+    always wins, ``pipeline_error`` outranks every non-hit state); no data
+    -> ``_no_data_verdict`` (RESULTS UNAVAILABLE, PIPELINE ERROR, RESULTS
+    UNREADABLE, SCREENING while running, else STANDBY). The run-health
+    inputs become subtitle clauses on the data states so frozen or partial
+    numbers cannot present as live, complete ones.
     """
     if not has_config:
         return _screening_descriptor() if pipeline_running else _standby_descriptor()
@@ -1254,7 +1248,7 @@ def select_verdict(
             pipeline_error_detail=pipeline_error_detail,
             **_run_health(stale_samples, run_stopped, stop_reason,
                           failed_tasks, input_layout_mismatch,
-                          batch_progress_clause),
+                          batch_progress_clause, disk_low),
         )
 
     return _no_data_verdict(
@@ -1263,12 +1257,15 @@ def select_verdict(
         pipeline_error=pipeline_error,
         pipeline_error_detail=pipeline_error_detail,
         pipeline_running=pipeline_running,
+        load_failed=load_failed,
+        load_error=load_error,
     )
 
 
 def _no_data_verdict(
     *, results_dir_lost, main_dir_available, pipeline_error,
-    pipeline_error_detail, pipeline_running,
+    pipeline_error_detail, pipeline_running, load_failed=False,
+    load_error=None,
 ) -> VerdictDescriptor:
     """The no-Kraken-data tail of select_verdict (pure)."""
     # A directory that held data earlier and is now unreadable is an event
@@ -1279,6 +1276,10 @@ def _no_data_verdict(
     if pipeline_error:
         return _pipeline_error_descriptor(
             pipeline_error_detail, has_partial_data=False)
+    # The loader raised: "we could not read" is not "nothing to read"
+    # (field audit 2026-10-28, M1).
+    if load_failed:
+        return _results_unreadable_descriptor(load_error)
 
     # Results directory present but no rows yet, pipeline still producing them.
     if main_dir_available and pipeline_running:
@@ -1389,9 +1390,34 @@ def _calculate_overall_status(
         "total_reads": total_reads,
         "quality_score": quality_score,
         "organisms_detected": organisms_detected,
-        "active_alerts": 0,  # Calculated later in _generate_alerts
         "samples_processed": samples_processed,
         "total_samples": total_samples
+    }
+
+
+def run_status_for_alerts(backend_status: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The run-state keys ``_generate_alerts`` reads, from the backend status.
+
+    ``_generate_alerts`` took these keys from the overall-status dict, which
+    ``_calculate_overall_status`` never wrote, so the engine saw a run that
+    was never running, never completed, had no errors and no files: its
+    completion alert and its error alert could not fire (bug audit
+    2026-11-06, item 37). ``compute_overall_status_cache`` now merges this
+    dict into the cache from the backend status it already holds.
+
+    Translates the BackendManager status names (``files_processed``,
+    ``files_waiting``, the ``errors`` list) to the alert engine's
+    (``processed_files``, ``pending_files``, ``error_count``) and carries
+    ``running`` / ``completed`` through. Every value is a plain bool or int,
+    so the result can ride the ``dashboard-overall-status-cache`` Store.
+    """
+    status = backend_status or {}
+    return {
+        "running": bool(status.get("running", False)),
+        "completed": bool(status.get("completed", False)),
+        "error_count": len(status.get("errors") or []),
+        "pending_files": int(status.get("files_waiting") or 0),
+        "processed_files": int(status.get("files_processed") or 0),
     }
 
 
@@ -1782,20 +1808,14 @@ def _generate_alerts(
     # Get global alert engine instance
     alert_engine = get_alert_engine()
 
-    # Run status for the alert engine, from the backend snapshot the
-    # overall-status cache carries under "_backend". These keys used to be
-    # read from overall_status itself, which never holds them, so the
-    # completed alert could never fire. pending_files is left at 0: the
-    # backend's files_waiting counts the whole input folder (including
-    # files already processed or skipped by the age filter) and would
-    # raise a false "files waiting" alert.
-    backend = overall_status.get("_backend") or {}
+    # Prepare status dictionary for alert engine. The cache carries these
+    # keys from the backend status (run_status_for_alerts).
     status = {
-        "running": bool(backend.get("running", False)),
-        "completed": bool(backend.get("completed", False)),
-        "error_count": int(backend.get("processes_failed", 0) or 0),
-        "pending_files": 0,
-        "processed_files": int(backend.get("files_processed", 0) or 0),
+        "running": overall_status.get("running", False),
+        "completed": overall_status.get("completed", False),
+        "error_count": overall_status.get("error_count", 0),
+        "pending_files": overall_status.get("pending_files", 0),
+        "processed_files": overall_status.get("processed_files", 0)
     }
 
     # Prepare samples list for alert engine

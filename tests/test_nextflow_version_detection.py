@@ -114,27 +114,27 @@ class TestDoctorFailsWithoutJava:
 
     def test_java_probe_exists(self):
         """A JRE check must be present at all -- there was none."""
-        from nanometa_live.cli import prepare
+        from nanometa_live.cli import doctor
 
-        assert hasattr(prepare, "_java_runtime_available"), (
+        assert hasattr(doctor, "_java_runtime_available"), (
             "no Java detection: Nextflow is a JVM application and a missing "
             "JRE is the most likely reason a field laptop cannot run it"
         )
 
     def test_missing_java_is_reported_as_a_failure(self, capsys):
-        from nanometa_live.cli import prepare
+        from nanometa_live.cli import doctor
 
         reported = []
 
         def fake_report(name, ok, message, hint=None, fatal=True):
             reported.append((name, ok, fatal))
 
-        with patch.object(prepare, "_java_runtime_available",
+        with patch.object(doctor, "_java_runtime_available",
                           return_value=(False, "not found")), \
              patch("shutil.which", return_value="/usr/bin/nextflow"), \
              patch("nanometa_live.core.workflow.bundle_manager."
                    "_get_nextflow_version", return_value="unknown"):
-            prepare._doctor_check_toolchain(fake_report)
+            doctor._doctor_check_toolchain(fake_report)
 
         java_rows = [r for r in reported if "Java" in r[0]]
         assert java_rows, f"no Java row reported; got {[r[0] for r in reported]}"
@@ -143,20 +143,20 @@ class TestDoctorFailsWithoutJava:
 
     def test_unparseable_nextflow_version_is_a_failure(self):
         """A version we cannot read is not a version we can accept."""
-        from nanometa_live.cli import prepare
+        from nanometa_live.cli import doctor
 
         reported = []
 
         def fake_report(name, ok, message, hint=None, fatal=True):
             reported.append((name, ok, fatal))
 
-        with patch.object(prepare, "_java_runtime_available",
+        with patch.object(doctor, "_java_runtime_available",
                           return_value=(True, "openjdk 17.0.9")), \
              patch("shutil.which", return_value="/usr/bin/nextflow"), \
              patch("nanometa_live.core.workflow.bundle_manager."
                    "_get_nextflow_version",
                    return_value=JAVA_MISSING_OUTPUT.strip()):
-            prepare._doctor_check_toolchain(fake_report)
+            doctor._doctor_check_toolchain(fake_report)
 
         nf_rows = [r for r in reported if r[0] == "Nextflow"]
         assert nf_rows and nf_rows[0][1] is False, (

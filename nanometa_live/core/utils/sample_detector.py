@@ -105,9 +105,16 @@ def _get_dir_mtimes(main_dir: str) -> Tuple[Tuple[str, float], ...]:
 
 
 def invalidate_sample_cache():
-    """Clear the sample detection cache (e.g. after data changes)."""
+    """Clear the sample-detection and file-mapping caches (e.g. after data changes).
+
+    Both are keyed on the same directory mtimes and both are run-scoped;
+    ``_file_mapping_cache`` was listed as cleared here by the cache inventory
+    but cleared by nothing, so a new run into the same outdir could be
+    answered with the previous run's file mapping (audit 2026-11-06, 37).
+    """
     with _sample_cache_lock:
         _sample_cache.clear()
+        _file_mapping_cache.clear()
 
 
 def resolve_analysis_directory(main_dir: str) -> str:

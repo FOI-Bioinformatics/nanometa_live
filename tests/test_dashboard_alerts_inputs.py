@@ -4,9 +4,8 @@
 Kraken2 frame was empty or held no reads, and the alert engine read that as
 a measured rate under its 20% critical floor: an empty results directory
 showed CRITICAL "Low organism identification: 0.0% of sequences
-classified". It also built the engine's run-status dict from keys the
-overall-status cache never carries (``running``, ``completed``,
-``error_count``), so the "Analysis completed" alert could never fire.
+classified". The run-state half (the completion alert) is upstream's
+run_status_for_alerts; the last test pins that it reaches the engine.
 """
 
 import os
@@ -53,8 +52,9 @@ def test_low_classification_alert_still_fires_on_measured_data(tmp_path):
 
 def test_completed_run_reaches_the_alert_engine(tmp_path):
     (tmp_path / "kraken2").mkdir()
+    from nanometa_live.app.tabs.dashboard_helpers import run_status_for_alerts
     overall = {"total_reads": 0,
-               "_backend": {"running": False, "completed": True}}
+               **run_status_for_alerts({"running": False, "completed": True})}
     alerts = _generate_alerts(overall, str(tmp_path), {}, [],
                               taxid_to_samples={})
     assert any(m.startswith("Analysis completed") for m in _messages(alerts))

@@ -79,6 +79,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     _format_time_elapsed,
     _collect_samples_data,
     _generate_alerts,
+    run_status_for_alerts,
     _estimate_pass_rate_from_quality,
     _estimate_classified_rate,
     _get_alerts_badge_color,
@@ -100,6 +101,7 @@ from nanometa_live.app.app import background_callback_manager
 # update_verdict_banner). In-process on purpose: after a restart the worst
 # case is one extra render.
 _VERDICT_LAST_RUN_STATE: dict = {}
+_ALERTS_LAST_RUN_STATE: dict = {}
 
 logger = logging.getLogger(__name__)
 
@@ -198,9 +200,30 @@ def register_dashboard_callbacks(app: Dash):
     )
     def compute_overall_status_cache(_fingerprint, _n_intervals, config, status, available_samples):
         """Compute overall status once per interval and cache for other callbacks."""
-        if interval_tick_is_redundant(ctx, "dashboard_overall_status", _fingerprint):
+        # A run-state change (e.g. running -> error, or -> completed) must
+        # recompute the cache even when no new output files landed: the alert
+        # engine's error and completion branches read the run state merged in
+        # below (run_status_for_alerts), and the results fingerprint does NOT
+        # change on an output-less errored run, so a fingerprint-only gate let
+        # the dashboard Alerts panel miss the error (bug audit 2026-11-08,
+        # finding 2). Mirrors the verdict banner's _VERDICT_LAST_RUN_STATE
+        # bypass; backend-status stays a State so its every-tick churn does not
+        # defeat the gate.
+        st = status or {}
+        run_state_now = (
+            "ACTIVE" if st.get("running")
+            else "ERROR" if st.get("pipeline_status") == "error"
+            else "COMPLETE" if st.get("completed")
+            else "STOPPED" if st.get("stopped_run")
+            else "STANDBY"
+        )
+        state_changed = _ALERTS_LAST_RUN_STATE.get("v") != run_state_now
+        if (not state_changed
+                and interval_tick_is_redundant(
+                    ctx, "dashboard_overall_status", _fingerprint)):
             raise PreventUpdate
         mark_rendered("dashboard_overall_status", _fingerprint)
+        _ALERTS_LAST_RUN_STATE["v"] = run_state_now
 
         should_load, main_dir = _should_load_data(config, status, available_samples)
         if not should_load:
@@ -210,16 +233,14 @@ def register_dashboard_callbacks(app: Dash):
             available_samples = _resolve_samples(main_dir, available_samples)
             pipeline_running = status.get("running", False)
             overall_status = _calculate_overall_status(main_dir, config, available_samples, pipeline_running)
+            # The alert engine's run-state inputs (completion, error and
+            # backlog alerts) come from the backend status this callback
+            # already holds; _generate_alerts reads them off this dict.
+            overall_status.update(run_status_for_alerts(status))
             # Include main_dir and samples_data so downstream callbacks don't recompute
             overall_status["_main_dir"] = main_dir
             overall_status["_samples_data"] = _collect_samples_data(main_dir, available_samples)
             overall_status["_available_samples"] = available_samples
-            # Run state for the alerts panel (see _generate_alerts).
-            overall_status["_backend"] = {
-                key: (status or {}).get(key)
-                for key in ("running", "completed", "processes_failed",
-                            "files_processed")
-            }
             return overall_status
         except Exception as e:
             logger.error(f"Error computing overall status cache: {e}", exc_info=True)
@@ -373,6 +394,8 @@ def register_dashboard_callbacks(app: Dash):
         )
 
         kraken_has_data = False
+        load_failed = False
+        load_error: Optional[str] = None
         dangerous: List[Dict[str, Any]] = []
         subthreshold: List[Dict[str, Any]] = []
         n_watched = 0
@@ -419,8 +442,12 @@ def register_dashboard_callbacks(app: Dash):
                     kraken_has_data = True
             except Exception as e:
                 logger.error(f"Error updating verdict banner: {e}", exc_info=True)
-                # A load failure falls back to STANDBY, matching the original.
-                main_dir_available = False
+                # A load failure is its own state, RESULTS UNREADABLE: it
+                # used to fall back to STANDBY, which rendered a running run
+                # whose report could not be parsed as "nothing to do"
+                # (field audit 2026-10-28, M1).
+                load_failed = True
+                load_error = f"{type(e).__name__}: {str(e)[:160]}"
                 kraken_has_data = False
                 dangerous = []
                 subthreshold = []
@@ -456,6 +483,11 @@ def register_dashboard_callbacks(app: Dash):
             # the verdict's attribution names the pipeline's grouping.
             input_layout_mismatch=(status or {}).get("input_layout_mismatch"),
             batch_progress_clause=_batch_progress_verdict_clause(main_dir),
+            # Free space on the results volume, polled by the backend each
+            # tick (field audit 2026-10-28, M3).
+            disk_low=(status or {}).get("disk_low"),
+            load_failed=load_failed,
+            load_error=load_error,
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes

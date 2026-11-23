@@ -93,8 +93,11 @@ def load_blast_validation_data(
     part of the key, so a watchlist edit can never be served from the
     previous entry. Returns per-call copies -- callers annotate the dicts.
     """
+    from nanometa_live.core.utils.classification_loaders import (
+        _sample_fingerprint_paths,
+    )
     from nanometa_live.core.utils.loader_utils import (
-        _check_mtime_cache, _store_mtime_cache,
+        _mtime_cache_lookup, _store_mtime_cache,
     )
 
     main_dir = resolve_analysis_directory(main_dir)
@@ -103,13 +106,66 @@ def load_blast_validation_data(
         if s.get("taxid") is not None and str(s["taxid"]).lstrip("-").isdigit()
     )))
     cache_key = f"blastval:{main_dir}:{sample}:{taxid_digest}"
+    # The on-disk fallback's denominator is the sample's Kraken2 clade count,
+    # so the entry depends on that sample's reports too: a report that
+    # advances with no validation change must not serve the old rate
+    # (finding 22). Sample-scoped, like the Kraken2 loader's own key.
     fingerprint_paths = [os.path.join(main_dir, "validation")]
-    cached = _check_mtime_cache(cache_key, fingerprint_paths)
-    if cached is not None:
+    fingerprint_paths.extend(
+        _sample_fingerprint_paths(os.path.join(main_dir, "kraken2"), sample))
+    state, cached, fingerprint = _mtime_cache_lookup(cache_key, fingerprint_paths)
+    if state == "hit":
         return {tid: dict(entry) for tid, entry in cached.items()}
     result = _load_blast_validation_data_uncached(main_dir, watchlist, sample)
-    _store_mtime_cache(cache_key, fingerprint_paths, result)
+    _store_mtime_cache(cache_key, fingerprint_paths, result, fingerprint=fingerprint)
     return {tid: dict(entry) for tid, entry in result.items()}
+
+
+def _clade_reads(row) -> int:
+    """A taxon's clade read count: ``cumul_reads``, else ``reads``.
+
+    The pipeline validates the clade (``KreportTree.cladeOf``), so the
+    denominator must be the clade too. The per-rank ``reads`` column is what
+    was assigned directly at the node; on the documented *F. tularensis*
+    report it is 3,406 against a clade of 9,602, and dividing the clade's
+    validated reads by it gave 282% (audit 2026-11-06, finding 22).
+    """
+    for col in ("cumul_reads", "reads"):
+        if col in row.index:
+            try:
+                value = row[col]
+            except (KeyError, IndexError):
+                continue
+            if value is not None and value == value:  # not NaN
+                return int(value)
+    return 0
+
+
+def _candidate_taxids(entry: Dict[str, Any]) -> List[int]:
+    """Ordered, de-duplicated ids to match a watchlist entry by: the Kraken2
+    database taxid first, then the NCBI taxid.
+
+    On a flextaxd/GTDB database a grafted organism's db node taxid differs
+    from its NCBI taxid (B. anthracis is Bacillus_A anthracis at 4005020, not
+    1392); nanometanf names the per-read BLAST files and keys the kraken
+    report by that db taxid, while the watchlist carries the NCBI taxid.
+    Matching on the NCBI taxid alone left the Organisms-tab BLAST badge empty
+    for exactly the grafted select agents, and the organism card looks the
+    result up by the db taxid it displays, so results are stored under every
+    candidate id (bug audit 2026-11-08, finding 1). On an NCBI database
+    db_taxid is unset and this is just ``[taxid]``.
+    """
+    out: List[int] = []
+    for raw in (entry.get("db_taxid"), entry.get("taxid")):
+        if raw is None:
+            continue
+        try:
+            val = int(raw)
+        except (ValueError, TypeError):
+            continue
+        if val not in out:
+            out.append(val)
+    return out
 
 
 def _load_blast_validation_data_uncached(
@@ -160,12 +216,12 @@ def _load_blast_validation_data_uncached(
     # (12,384 aggregate entries x 129 watchlist = 1.6 M comparisons).
     wl_by_taxid: Dict[int, Dict[str, Any]] = {}
     for s in watchlist:
-        try:
-            tid_key = int(s["taxid"]) if s.get("taxid") is not None else None
-        except (ValueError, TypeError):
-            tid_key = None
-        if tid_key is not None and tid_key not in wl_by_taxid:
-            wl_by_taxid[tid_key] = s
+        # Register under both the db taxid and the NCBI taxid so a canonical
+        # or aggregate entry keyed by either id (flextaxd keys by the db
+        # taxid) finds this watchlist entry.
+        for tid_key in _candidate_taxids(s):
+            if tid_key not in wl_by_taxid:
+                wl_by_taxid[tid_key] = s
 
     canonical_data = load_canonical_validation(main_dir)
     if canonical_data is not None:
@@ -192,7 +248,11 @@ def _load_blast_validation_data_uncached(
                     "avg_identity": entry.get("avg_identity", 0.0),
                 }
 
-                results[tid] = result_entry
+                # Store under every candidate id (db + NCBI) so the organism
+                # card finds it whether it looks up by the db taxid it
+                # displays or the NCBI taxid.
+                for key in _candidate_taxids(watchlist_match) or [tid]:
+                    results.setdefault(key, result_entry)
 
     # Check the nanometanf aggregate validation JSON (both BLAST and minimap2)
     # for taxids the canonical data did not cover.
@@ -244,7 +304,8 @@ def _load_blast_validation_data_uncached(
                         result_entry['minimap2_avg_mapq'] = float(entry.get('avg_mapq', 0.0))
                         result_entry['minimap2_status'] = entry.get('minimap2_status', 'no_data')
 
-                    results[tid] = result_entry
+                    for key in _candidate_taxids(watchlist_match) or [tid]:
+                        results.setdefault(key, result_entry)
 
             if results:
                 logging.info(
@@ -276,20 +337,15 @@ def _load_blast_validation_data_uncached(
     blast_index: Optional[Dict[int, List[str]]] = None
 
     for species in watchlist:
-        taxid = species.get('taxid')
-        name = species.get('name', f'Species {taxid}')
+        # db taxid first, then NCBI taxid: the on-disk BLAST files and the
+        # kraken report are keyed by the db/extraction taxid on a flextaxd DB.
+        candidates = _candidate_taxids(species)
+        name = species.get('name') or f"Species {candidates[0] if candidates else '?'}"
 
-        if taxid is None:
+        if not candidates:
             continue
 
-        # Convert taxid to int if string
-        try:
-            taxid = int(taxid)
-        except (ValueError, TypeError):
-            logging.warning(f"Invalid taxid: {taxid}")
-            continue
-
-        if taxid in results:
+        if any(c in results for c in candidates):
             continue
 
         # Find BLAST result files for this taxid. nanometanf names them with
@@ -299,11 +355,16 @@ def _load_blast_validation_data_uncached(
         # the whole (potentially tens of thousands of files) dir each time.
         if blast_index is None:
             blast_index = _index_blast_dir(blast_dir)
-        blast_files = [
-            fp for fp in blast_index.get(taxid, [])
-            if sample is None or sample == "All Samples"
-            or os.path.basename(fp).startswith(f"{sample}_")
-        ]
+        blast_files = []
+        for cand in candidates:
+            hits = [
+                fp for fp in blast_index.get(cand, [])
+                if sample is None or sample == "All Samples"
+                or os.path.basename(fp).startswith(f"{sample}_")
+            ]
+            if hits:
+                blast_files = hits
+                break
 
         # Count validated reads from all matching files
         unique_reads = set()
@@ -328,13 +389,17 @@ def _load_blast_validation_data_uncached(
         total_reads = 0
 
         if not kraken_df.empty:
-            species_row = kraken_df[kraken_df['taxid'] == taxid]
-            if not species_row.empty:
-                total_reads = int(species_row.iloc[0]['reads'])
+            for cand in candidates:
+                species_row = kraken_df[kraken_df['taxid'] == cand]
+                if not species_row.empty:
+                    total_reads = _clade_reads(species_row.iloc[0])
+                    break
 
-        # Calculate validation rate
+        # Calculate validation rate. Clamped: a read set extracted from a
+        # superset of the denominator (an older report, a wider clade) must
+        # never read as more than fully validated.
         if total_reads > 0:
-            validation_rate = (validated_count / total_reads) * 100
+            validation_rate = min((validated_count / total_reads) * 100, 100.0)
         else:
             validation_rate = 0.0
 
@@ -348,13 +413,17 @@ def _load_blast_validation_data_uncached(
         else:
             status = 'failed'
 
-        results[taxid] = {
-            'taxid': taxid,
+        result_entry = {
+            'taxid': candidates[0],
             'name': name,
             'total_reads': total_reads,
             'validated_reads': validated_count,
             'validation_rate': round(validation_rate, 1),
             'status': status
         }
+        # Key under every candidate id so the organism card finds it whether
+        # it looks up by the displayed db taxid or the NCBI taxid.
+        for key in candidates:
+            results.setdefault(key, result_entry)
 
     return results
