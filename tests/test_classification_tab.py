@@ -164,10 +164,21 @@ class TestClassificationVisualizations:
 
         fig = create_sunburst_data(sample_kraken_df, domains, tax_levels, min_reads, config_dict)
 
-        # Should still show hierarchy (root + domain + hierarchy) even with high threshold
-        # Hierarchy levels are always included regardless of min_reads
+        # The threshold applies to cumulative reads at every level, as in the
+        # Sankey: higher ranks survive ordinary thresholds because their
+        # cumulative counts are larger, and a threshold above every taxon
+        # leaves nothing to draw -- the chart says so instead of drawing a
+        # hierarchy the filter excluded.
         assert fig is not None
-        assert len(fig.data[0].labels) >= 2  # At least root + domain
+        labels = list(fig.data[0].labels)
+        assert labels == ["No data matches the selected filters"]
+
+    def test_sunburst_min_reads_keeps_ranks_above_the_threshold(
+            self, sample_kraken_df, config_dict):
+        fig = create_sunburst_data(sample_kraken_df, ["Bacteria"],
+                                   ["D", "P", "C", "O", "F", "G", "S"], 10,
+                                   config_dict)
+        assert "Bacteria" in fig.data[0].labels
 
     def test_sunburst_empty_result(self, sample_kraken_df, config_dict):
         """Test Sunburst chart with filters that produce no results."""

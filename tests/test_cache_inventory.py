@@ -36,6 +36,7 @@ WATCHED_MODULES = [
     "core/parsers/blast_validation_parser.py",
     "app/utils/organisms_memo.py",
     "app/utils/batch_progress.py",
+    "app/utils/freshness.py",
     "app/tabs/kraken2_helpers.py",
     "app/tabs/validation_tab_helpers.py",
 ]
@@ -60,6 +61,7 @@ COVERED_OR_EXEMPT = {
     "_TAXONOMY_CACHE",   # kraken2_helpers (harness reset + single-DB evict)
     "_batch_ids_memo",   # validation_tab_helpers (dir-mtime keyed, bounded)
     "_progress_memo",    # batch_progress (clear_batch_progress_memo, both paths)
+    "_freshness_memo",   # freshness (clear_freshness_memo, both paths)
     # exempt: not caches
     "_saturation_warned",   # once-per-path warning dedup, tiny, harmless
     "_fallback_served_paths",  # classification_loaders: transience marker, cleared with the frame cache

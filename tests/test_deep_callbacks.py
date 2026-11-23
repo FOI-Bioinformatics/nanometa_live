@@ -276,13 +276,22 @@ class TestWelcomeModal:
     def test_close_goes_to_config(self, app_backend):
         fn = _fn(app_backend[0], "welcome-modal.is_open")
         with _ctx("close-welcome-modal"):
-            assert fn(False, 1) == (False, "config-tab")
+            assert fn(False, 1, {}) == (False, "config-tab")
 
     def test_first_visit_opens(self, app_backend):
         fn = _fn(app_backend[0], "welcome-modal.is_open")
         with _ctx("welcome-shown"):
-            is_open, tab = fn(False, 0)
+            is_open, tab = fn(False, 0, {})
         assert is_open is True
+
+    def test_not_shown_in_visualization_mode(self, app_backend):
+        """The modal walks through configure -> prepare -> Start Analysis and
+        suggests --main_dir; in visualization-only mode Start is disabled
+        and the operator already used --main_dir (2026-11-23 live walk)."""
+        fn = _fn(app_backend[0], "welcome-modal.is_open")
+        with _ctx("welcome-shown"):
+            is_open, _tab = fn(False, 0, {"visualization_only": True})
+        assert is_open is False
 
     def test_mark_shown(self, app_backend):
         fn = _fn(app_backend[0], "welcome-shown.data")

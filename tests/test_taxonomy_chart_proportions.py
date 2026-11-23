@@ -116,3 +116,70 @@ def test_sunburst_values_are_consistent_for_total_mode():
     for parent, total in child_sum.items():
         # plotly drops a "total" sector whose children exceed it.
         assert values[parent] >= total, parent
+
+
+# --- Filters the Taxonomy tab offers ---------------------------------------
+#
+# "Minimum DNA Sequences: hide organisms with fewer sequences than this
+# value". create_sankey_data accepted min_reads and never used it; the
+# Sunburst applied it to species on the DIRECT read column, so a species
+# whose reads sit in its subspecies vanished. The Sunburst also ignored the
+# Domain selection. Both charts now hide any taxon whose cumulative reads
+# are below the value, and both honour the domains.
+
+def _two_domain_df():
+    rows = [
+        [10.0, 10, 10, "U", 0, "unclassified", 0],
+        [90.0, 90, 0, "R", 1, "root", 0],
+        [80.0, 80, 0, "D", 2, "Bacteria", 1],
+        [80.0, 80, 0, "G", 100, "GenA", 2],
+        [75.0, 75, 0, "S", 101, "GenA spA", 100],     # all reads in S1
+        [75.0, 75, 75, "S1", 102, "GenA spA sub1", 101],
+        [5.0, 5, 5, "S", 103, "GenA spB", 100],
+        [10.0, 10, 0, "D", 10239, "Viruses", 1],
+        [10.0, 10, 0, "G", 200, "VirG", 10239],
+        [10.0, 10, 10, "S", 201, "VirG spV", 200],
+    ]
+    return pd.DataFrame(rows, columns=_COLUMNS)
+
+
+def _sankey_names(min_reads, domains=("Bacteria",)):
+    fig = create_sankey_data(
+        _two_domain_df(), domains=list(domains), tax_levels=["D", "G", "S"],
+        min_reads=min_reads, max_taxa_per_level=10)
+    return {cd[3] for cd in fig.data[0].node.customdata}
+
+
+def _sunburst_labels(min_reads, domains=("Bacteria",)):
+    fig = create_sunburst_data(
+        _two_domain_df(), domains=list(domains), tax_levels=["D", "G", "S"],
+        min_reads=min_reads, config={})
+    return set(fig.data[0].labels)
+
+
+def test_sankey_hides_taxa_below_minimum_reads():
+    assert "GenA spB" in _sankey_names(1)
+    assert "GenA spB" not in _sankey_names(10)
+
+
+def test_sunburst_keeps_a_species_whose_reads_sit_in_subspecies():
+    labels = _sunburst_labels(10)
+    assert "GenA spA" in labels
+    assert "GenA spB" not in labels
+
+
+def test_sunburst_honours_the_domain_selection():
+    assert "VirG spV" not in _sunburst_labels(1, domains=("Bacteria",))
+    assert "VirG spV" in _sunburst_labels(1, domains=("Bacteria", "Viruses"))
+
+
+def test_both_views_state_the_same_share_of_all_reads():
+    """Sankey "Proportion" and Sunburst "Of total" describe one taxon with
+    one number: its share of all reads in the sample (Kraken2's %). The
+    Sunburst divided by the reads it displayed, so Firmicutes read 71.5% in
+    one view and about 79% in the other on the same data."""
+    sankey = _sankey_pct_by_name()
+    sb = _sunburst()
+    sunburst = {label: cd[2] for label, cd in zip(sb.labels, sb.customdata)}
+    for name in ("Bacteria", "Proteo", "GenA", "GenB"):
+        assert sunburst[name] == pytest.approx(sankey[name]), name

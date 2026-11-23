@@ -109,6 +109,13 @@ _VALIDATION_BADGE_STYLES = {
 }
 
 
+# The middle confidence band. The alert panel passes "MODERATE", the word the
+# Pathogen Report modal uses (compute_detection_confidence); "MEDIUM" is kept
+# for callers that still pass it. Testing only for "MEDIUM" drew a MODERATE
+# card's certainty bar as the red 25% of LOW.
+_MID_CONFIDENCE = ("MODERATE", "MEDIUM")
+
+
 def _validation_badge(
     validation: Optional[Dict[str, Any]],
     *,
@@ -352,8 +359,8 @@ def CriticalPathogenAlert(
                 html.Div([
                     html.Small("Detection certainty", className="text-muted me-2"),
                     dbc.Progress(
-                        value=100 if confidence == "HIGH" else 60 if confidence == "MEDIUM" else 25,
-                        color="success" if confidence == "HIGH" else "warning" if confidence == "MEDIUM" else "danger",
+                        value=100 if confidence == "HIGH" else 60 if confidence in _MID_CONFIDENCE else 25,
+                        color="success" if confidence == "HIGH" else "warning" if confidence in _MID_CONFIDENCE else "danger",
                         style={"height": "6px", "flex": "1"},
                         className="my-1"
                     ),
@@ -572,13 +579,3 @@ def WatchedSpeciesAlert(
     ], className="mb-2")
 
 
-def _calculate_confidence(pathogen: Dict[str, Any]) -> str:
-    """Calculate confidence level based on read count and other metrics."""
-    reads = pathogen.get("reads", 0)
-
-    if reads >= 100:
-        return "HIGH"
-    elif reads >= 20:
-        return "MEDIUM"
-    else:
-        return "LOW"

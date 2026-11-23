@@ -37,42 +37,50 @@ def _kreport_sample_name(path: str) -> str:
 
 
 def aggregate_fastp_read_stats(summaries: list) -> dict:
-    """Weighted-average read statistics over a list of fastp ``summary`` dicts.
+    """Weighted read statistics over a list of fastp ``summary`` dicts.
 
     Each summary has ``before_filtering`` / ``after_filtering`` blocks with
-    ``total_reads``, ``read1_mean_length`` and ``gc_content``. Mean lengths are
-    read-count-weighted across files; GC is a simple mean of the per-file
-    after-filtering values (converted to a percentage).
+    ``total_reads``, ``total_bases``, a mean read length and ``gc_content``.
+    Mean length is total bases over total reads (exact); when a block lacks
+    ``total_bases`` it is estimated from the block's mean length
+    (``read1_mean_length``, or ``read_length_mean`` as some writers name it).
+    GC is a per-base figure and is weighted by bases; a simple mean of the
+    per-file values let a 10-read file count as much as a 10,000-read one.
 
     Returns ``{"mean_length", "mean_length_before", "gc_content"}`` where the
     "before" and GC values are ``None`` when unavailable.
     """
-    total_reads_after = 0
-    total_reads_before = 0
-    total_length_after = 0
-    total_length_before = 0
-    gc_values = []
+    def _bases(block):
+        bases = block.get("total_bases")
+        if bases:
+            return float(bases)
+        mean_len = block.get("read1_mean_length", block.get("read_length_mean", 0)) or 0
+        return float(mean_len) * float(block.get("total_reads", 0) or 0)
+
+    reads_after = reads_before = 0
+    bases_after = bases_before = 0.0
+    gc_weighted = gc_weight = 0.0
 
     for summary in summaries:
         before = summary.get("before_filtering", {})
         after = summary.get("after_filtering", {})
 
-        reads_before = before.get("total_reads", 0)
-        reads_after = after.get("total_reads", 0)
-        total_reads_before += reads_before
-        total_reads_after += reads_after
+        reads_before += before.get("total_reads", 0) or 0
+        reads_after += after.get("total_reads", 0) or 0
+        b_before = _bases(before)
+        b_after = _bases(after)
+        bases_before += b_before
+        bases_after += b_after
 
-        total_length_after += after.get("read1_mean_length", 0) * reads_after
-        total_length_before += before.get("read1_mean_length", 0) * reads_before
-
-        gc = after.get("gc_content", 0)
-        if gc > 0:
-            gc_values.append(gc * 100)  # Convert to percentage
+        gc = after.get("gc_content", 0) or 0
+        if gc > 0 and b_after > 0:
+            gc_weighted += gc * 100 * b_after  # fraction -> percentage
+            gc_weight += b_after
 
     return {
-        "mean_length": (total_length_after / total_reads_after) if total_reads_after > 0 else 0.0,
-        "mean_length_before": (total_length_before / total_reads_before) if total_reads_before > 0 else None,
-        "gc_content": (sum(gc_values) / len(gc_values)) if gc_values else None,
+        "mean_length": (bases_after / reads_after) if reads_after > 0 else 0.0,
+        "mean_length_before": (bases_before / reads_before) if reads_before > 0 else None,
+        "gc_content": (gc_weighted / gc_weight) if gc_weight > 0 else None,
     }
 
 

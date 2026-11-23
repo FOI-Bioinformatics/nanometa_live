@@ -105,6 +105,27 @@ class TestConfigFormDirty:
         form = self._form(skip_nanoplot=True)
         assert config_form_dirty(snapshot, form=form) is False
 
+    def test_key_absent_from_snapshot_compares_with_its_default(self):
+        """A saved config without a key (visualization mode carries few)
+        shows the default_config() fallback in the form; comparing that with
+        None flagged a freshly loaded, unedited form as Modified."""
+        from nanometa_live.core.config.config_loader import default_config
+
+        defaults = default_config()
+        keys = ["blast_validation", "processing_mode", "sample_handling",
+                "min_reads_for_validation", "qc_tool"]
+        form = {k: defaults[k] for k in keys}
+        snapshot = {"main_dir": "/results", "visualization_only": True}
+        assert config_form_dirty(snapshot, form=form) is False
+
+    def test_key_absent_from_snapshot_still_flags_a_real_edit(self):
+        from nanometa_live.core.config.config_loader import default_config
+
+        snapshot = {"main_dir": "/results"}
+        form = {"processing_mode": "realtime"
+                if default_config()["processing_mode"] != "realtime" else "batch"}
+        assert config_form_dirty(snapshot, form=form) is True
+
 
 class TestPipelineSourceFromForm:
     def test_remote_branch(self):

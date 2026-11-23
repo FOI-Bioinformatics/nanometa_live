@@ -78,6 +78,8 @@ def classify_state(
     buffer: List[Dict[str, float]],
     now: float,
     pipeline_running: bool,
+    last_progress: Optional[float] = None,
+    watch_since: Optional[float] = None,
 ) -> str:
     """
     Map the current buffer + pipeline status to a tile state.
@@ -86,24 +88,66 @@ def classify_state(
     when the pipeline is not running or the buffer has fewer than two
     ticks. A stall requires the pipeline to be running and no nonzero
     delta within STALL_THRESHOLD_S.
+
+    ``last_progress`` and ``watch_since`` carry history the rate window
+    cannot hold: the buffer spans BUFFER_LIMIT ticks (about 50 s at the
+    10 s run cadence), shorter than STALL_THRESHOLD_S, so from the buffer
+    alone a stall was never observable. Both default to what the buffer
+    shows. See :func:`advance_throughput`.
     """
     if not pipeline_running:
         return "idle"
     if not buffer or len(buffer) < 2:
         return "idle"
-    last_progress = last_nonzero_delta_ts(buffer)
+    if last_progress is None:
+        last_progress = last_nonzero_delta_ts(buffer)
     if last_progress is not None and (now - last_progress) <= STALL_THRESHOLD_S:
         return "normal"
     if last_progress is None:
-        # Pipeline running but never observed progress in-buffer; only
-        # flip to stalled once enough wall time has passed.
-        first_ts = float(buffer[0]["ts"])
+        # Pipeline running but never observed progress; only flip to
+        # stalled once enough wall time has passed.
+        first_ts = watch_since if watch_since is not None else float(buffer[0]["ts"])
         if now - first_ts > STALL_THRESHOLD_S:
             return "stalled"
         return "idle"
-    if now - last_progress > STALL_THRESHOLD_S:
-        return "stalled"
-    return "normal"
+    return "stalled"
+
+
+def advance_throughput(
+    state: Optional[Dict],
+    now: float,
+    total_reads: int,
+    total_files: int,
+    running: bool,
+) -> Tuple[Dict, str]:
+    """Advance the tile's stored state by one tick; return (state, tile state).
+
+    ``state`` is the ``throughput-buffer`` Store value without its ``dir``
+    key handling (the caller resets it on an outdir switch). Besides the
+    rate window (``ticks``) it keeps:
+
+    - ``last_progress``: the last tick at which reads advanced. It must
+      outlive the rate window, or a stall is forgotten before it is old
+      enough to report.
+    - ``watch_since``: when the current run was first seen running, so a
+      run that never produces reads also stalls after the threshold.
+
+    Both reset when the pipeline is not running, so one run's stall clock
+    never carries into the next.
+    """
+    state = dict(state or {})
+    ticks = append_tick(state.get("ticks") or [], now, total_reads, total_files)
+    if running:
+        last_progress = last_nonzero_delta_ts(ticks) or state.get("last_progress")
+        watch_since = state.get("watch_since")
+        if watch_since is None:
+            watch_since = now
+    else:
+        last_progress = None
+        watch_since = None
+    tile_state = classify_state(ticks, now, running, last_progress, watch_since)
+    state.update(ticks=ticks, last_progress=last_progress, watch_since=watch_since)
+    return state, tile_state
 
 
 def format_age_seconds(seconds: float) -> str:

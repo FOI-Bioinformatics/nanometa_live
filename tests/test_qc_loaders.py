@@ -249,3 +249,17 @@ def test_nanoplot_multisample_mean_is_read_weighted(tmp_path):
     assert 10.0 <= agg["mean_read_quality"] < 10.3
     assert agg["number_of_reads"] == 1010
     assert agg["total_bases"] == 1_050_000
+    # The pooled N50 is not derivable from per-sample N50s; the largest
+    # (6,000, from a 10-read sample) was reported as the run's N50.
+    assert agg["read_length_n50"] is None
+
+
+def test_nanoplot_single_sample_keeps_its_n50(tmp_path):
+    from nanometa_live.core.utils.qc_loaders import load_nanoplot_stats
+    nd = tmp_path / "nanoplot" / "barcode01"
+    nd.mkdir(parents=True)
+    (nd / "NanoStats.txt").write_text(
+        "Mean read length: 1,000.0\nMean read quality: 10.0\n"
+        "Number of reads: 1,000\nTotal bases: 1,000,000\nRead length N50: 1,200\n"
+    )
+    assert load_nanoplot_stats(str(tmp_path), None)["read_length_n50"] == 1200

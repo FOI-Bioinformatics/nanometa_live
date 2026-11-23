@@ -28,14 +28,16 @@ __all__ = [
 def threat_badge(level: str, className: str = "", uppercase: bool = False):
     """A colored badge for a threat level, with the meaning as hover text."""
     info = threat_level_info(level)
+    # The level colour goes in ``color`` (dbc accepts any CSS colour there).
+    # As an inline background it lost to the default color="secondary",
+    # whose bg-secondary class sets the background !important: every
+    # threat badge rendered grey.
     return dbc.Badge(
         info["alias"] if uppercase else info["label"],
         title=info["meaning"],
         className=className,
-        style={
-            "backgroundColor": info["hex"],
-            "color": "#fff" if level != "moderate" else info["text_hex"],
-        },
+        color=info["hex"],
+        style={"color": "#fff" if level != "moderate" else info["text_hex"]},
     )
 
 

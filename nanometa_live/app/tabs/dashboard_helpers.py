@@ -27,6 +27,7 @@ from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
     load_nanoplot_stats,
     load_seqkit_stats,
+    summarize_seqkit_rows,
 )
 from nanometa_live.core.utils.alert_engine import get_alert_engine
 from nanometa_live.core.taxonomy.ranks import species_rank_mask
@@ -407,6 +408,16 @@ def compute_detection_confidence(reads, abundance_pct=None) -> str:
     if r >= 1:
         return "Low"
     return "N/A"
+
+
+def _card_confidence(reads) -> str:
+    """Alert-card confidence label: the modal's bands, in the card's case.
+
+    One detection must carry one confidence on the card and in the Pathogen
+    Report modal; the card used HIGH >= 100 else MODERATE, so 5 reads were
+    MODERATE on the card and Low in the modal.
+    """
+    return compute_detection_confidence(reads).upper()
 
 
 def _meta_row(label: str, value: Any, badge: Optional[str] = None) -> html.Div:
@@ -976,7 +987,8 @@ def _shallow_depth_clause(
 
 def _action_required_subtitle(n_found: int, n_watched: int,
                               validation_has_results: bool,
-                              depth_clause: str = "") -> str:
+                              depth_clause: str = "",
+                              n_moderate: int = 0) -> str:
     """Subtitle for ACTION REQUIRED.
 
     n_found counts only entries above each pathogen's alert_threshold; the
@@ -984,8 +996,15 @@ def _action_required_subtitle(n_found: int, n_watched: int,
     counters legitimately differ. The wording makes the threshold gate
     explicit, states the depth when it is too low to stand on its own, and
     flags when confirmatory validation has not yet run.
+
+    ``n_found`` counts the critical and high hits -- exactly those the banner
+    names under "Above threshold:". Moderate hits above threshold are stated
+    separately; counting them in ``n_found`` put a larger number above a
+    shorter list.
     """
     sub = f"{n_found} of {n_watched} watched pathogens above alert threshold"
+    if n_moderate:
+        sub += f", plus {n_moderate} moderate-risk"
     sub += depth_clause
     if not validation_has_results:
         sub += " — pending confirmatory validation"
@@ -1015,8 +1034,9 @@ def _detection_descriptor(
             icon="exclamation-octagon-fill", icon_color="#8b0000",
             title="ACTION REQUIRED",
             subtitle=_action_required_subtitle(
-                len(dangerous), n_watched, validation_has_results,
-                depth_clause),
+                len(critical) + len(high_risk), n_watched,
+                validation_has_results, depth_clause,
+                n_moderate=len(dangerous) - len(critical) - len(high_risk)),
             sub_color="#721c24", bg_color="#f8d7da",
             border_color="#8b0000",
             show_icon_mobile=True, needs_attribution=True,
@@ -1436,10 +1456,13 @@ def _estimate_quality_score(main_dir: str, kraken_df: pd.DataFrame) -> Optional[
 
         # Adjust based on N50 (bonus for good read lengths)
         nanoplot_stats = load_nanoplot_stats(main_dir)
-        n50 = nanoplot_stats.get('read_length_n50', 0)
+        # An unknown N50 (None, or 0 when absent) is not a short-read N50:
+        # pooled seqkit rows report None, and penalising it as "very short
+        # reads" lowered the score for missing data.
+        n50 = nanoplot_stats.get('read_length_n50') or 0
         if n50 > 5000:
             score = min(100, score + 5)  # Bonus for long reads
-        elif n50 < 1000:
+        elif 0 < n50 < 1000:
             score -= 10  # Penalty for very short reads
 
         # Minor adjustment for classification rate (but don't over-penalize)
@@ -1573,12 +1596,16 @@ def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str
     )
 
 
-def _format_time_elapsed(start_time: Optional[str]) -> str:
+def _format_time_elapsed(start_time: Optional[str],
+                         ended_at: Optional[str] = None) -> str:
     """
     Format elapsed time since analysis start.
 
     Args:
         start_time: ISO format timestamp string
+        ended_at: ISO timestamp the run ended, for a finished run. The clock
+            stops there; without it a re-render after the run showed the
+            wall-clock time since Start.
 
     Returns:
         Formatted time string (HH:MM:SS)
@@ -1588,7 +1615,8 @@ def _format_time_elapsed(start_time: Optional[str]) -> str:
 
     try:
         start_dt = datetime.fromisoformat(start_time)
-        elapsed = datetime.now() - start_dt
+        end_dt = datetime.fromisoformat(ended_at) if ended_at else datetime.now()
+        elapsed = end_dt - start_dt
         hours, remainder = divmod(int(elapsed.total_seconds()), 3600)
         minutes, seconds = divmod(remainder, 60)
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
@@ -1663,7 +1691,8 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
             if not seqkit_df.empty:
                 # seqkit provides per-sample stats: sum_len, N50, AvgQual
                 total_bases = int(seqkit_df['sum_len'].sum()) if 'sum_len' in seqkit_df.columns else 0
-                n50 = int(seqkit_df['N50'].iloc[0]) if 'N50' in seqkit_df.columns and len(seqkit_df) > 0 else 0
+                # None (unknown) for a sum of batches; rendered as "--".
+                n50 = summarize_seqkit_rows(seqkit_df)["n50"] or 0
                 mean_q = float(seqkit_df['AvgQual'].iloc[0]) if 'AvgQual' in seqkit_df.columns and len(seqkit_df) > 0 else 0.0
                 logger.debug(f"Sample {sample}: Using seqkit stats - bases={total_bases}, n50={n50}, mean_q={mean_q}")
             else:
@@ -1672,7 +1701,7 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
                 if nanoplot_stats and nanoplot_stats.get("number_of_reads", 0) > 0:
                     total_bases = nanoplot_stats.get("total_bases", 0)
                     mean_q = nanoplot_stats.get("mean_read_quality", 0.0)
-                    n50 = nanoplot_stats.get("read_length_n50", 0)
+                    n50 = nanoplot_stats.get("read_length_n50") or 0
                     logger.debug(f"Sample {sample}: Using NanoPlot stats - bases={total_bases}, n50={n50}, mean_q={mean_q}")
 
             # Format bases for display
@@ -1753,13 +1782,20 @@ def _generate_alerts(
     # Get global alert engine instance
     alert_engine = get_alert_engine()
 
-    # Prepare status dictionary for alert engine
+    # Run status for the alert engine, from the backend snapshot the
+    # overall-status cache carries under "_backend". These keys used to be
+    # read from overall_status itself, which never holds them, so the
+    # completed alert could never fire. pending_files is left at 0: the
+    # backend's files_waiting counts the whole input folder (including
+    # files already processed or skipped by the age filter) and would
+    # raise a false "files waiting" alert.
+    backend = overall_status.get("_backend") or {}
     status = {
-        "running": overall_status.get("running", False),
-        "completed": overall_status.get("completed", False),
-        "error_count": overall_status.get("error_count", 0),
-        "pending_files": overall_status.get("pending_files", 0),
-        "processed_files": overall_status.get("processed_files", 0)
+        "running": bool(backend.get("running", False)),
+        "completed": bool(backend.get("completed", False)),
+        "error_count": int(backend.get("processes_failed", 0) or 0),
+        "pending_files": 0,
+        "processed_files": int(backend.get("files_processed", 0) or 0),
     }
 
     # Prepare samples list for alert engine
@@ -1790,8 +1826,10 @@ def _generate_alerts(
         })
 
     # Prepare QC stats - use actual classification data from Kraken2
-    # instead of the crude heuristic _estimate_classified_rate
-    actual_classified_rate = 0.0
+    # instead of the crude heuristic _estimate_classified_rate. None means
+    # "not measured" (no report, or a report with no reads): the engine
+    # skips the check rather than reading 0.0 as a measured rate.
+    actual_classified_rate: Optional[float] = None
     try:
         kraken_df = load_kraken_data(main_dir, "All Samples")
         if not kraken_df.empty:
@@ -2030,7 +2068,7 @@ def _create_pathogen_alert_panel(
                             common_name=common_name,
                             read_count=reads,
                             abundance_pct=abundance,
-                            confidence="HIGH" if reads >= 100 else "MODERATE",
+                            confidence=_card_confidence(reads),
                             taxid=taxid,
                             recommendation=action,
                             samples=detection_samples,

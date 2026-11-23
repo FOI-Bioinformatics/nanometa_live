@@ -106,6 +106,29 @@ class TestNetworkConnectivity:
         assert all(not r.passed for r in results)
         assert all("unreachable" in r.message for r in results)
 
+    def test_an_http_error_response_means_reachable(self, checker):
+        """NCBI's eutils root answers a bare GET with HTTP 400. A response
+        is proof the host is reachable; the checklist called it
+        "unreachable: HTTP Error 400: Bad Request"."""
+        import urllib.error
+
+        err = urllib.error.HTTPError("u", 400, "Bad Request", {}, None)
+        with patch("urllib.request.urlopen", side_effect=err):
+            results = checker._check_network_connectivity()
+        assert all(r.passed for r in results)
+
+    def test_timeout_is_described_in_plain_words(self, checker):
+        import socket
+        import urllib.error
+
+        err = urllib.error.URLError(socket.timeout("timed out"))
+        with patch("urllib.request.urlopen", side_effect=err):
+            results = checker._check_network_connectivity()
+        assert all(not r.passed for r in results)
+        for r in results:
+            assert "<urlopen error" not in r.message
+            assert "did not respond" in r.message
+
     def test_partial_connectivity(self, checker):
         def side_effect(url, **kwargs):
             if "ncbi" in url:
@@ -276,3 +299,18 @@ class TestReadinessReport:
         report = ReadinessReport()
         assert report.ready is True
         assert report.summary()["total"] == 0
+
+
+
+class TestChecklistWording:
+    def test_missing_nextflow_is_reported_once(self, checker, tmp_path):
+        """The tool check reports a missing nextflow as CRITICAL; the version
+        check added a second row for the same cause."""
+        with patch("subprocess.run", side_effect=FileNotFoundError()):
+            result = checker._check_nextflow_version()
+        assert result is None
+
+    def test_pipeline_source_message_points_at_the_configuration_tab(self, checker):
+        result = checker._check_pipeline_cached({})
+        assert not result.passed
+        assert "Configuration tab" in result.message

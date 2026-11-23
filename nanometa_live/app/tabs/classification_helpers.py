@@ -262,7 +262,29 @@ def _total_read_count(kraken_df) -> int:
     return int(kraken_df["reads"].sum()) if "reads" in kraken_df.columns else 0
 
 
-def _build_sankey_frames(kraken_df, domains, tax_levels):
+def _domain_taxid_set(kraken_df, taxid_to_parent, domains) -> set:
+    """Every taxid at or below the named domains (taxid subtree membership,
+    independent of row order). Shared by the Sankey and the Sunburst so the
+    Domain selection means the same in both views."""
+    children_map: dict = {}
+    for taxid, parent_taxid in taxid_to_parent.items():
+        children_map.setdefault(parent_taxid, []).append(taxid)
+
+    result = set()
+    names = kraken_df["name"].str.strip()
+    for domain in domains or []:
+        domain_rows = kraken_df[names == domain]
+        if domain_rows.empty:
+            continue
+        stack = [int(domain_rows.iloc[0]["taxid"])]
+        while stack:
+            tid = stack.pop()
+            result.add(tid)
+            stack.extend(children_map.get(tid, []))
+    return result
+
+
+def _build_sankey_frames(kraken_df, domains, tax_levels, min_reads=0):
     """Filter the kraken frame to the requested domains and tax levels.
 
     Returns ``(tax_df, domain_df, total_reads, taxid_to_parent, taxid_to_key)``
@@ -288,29 +310,7 @@ def _build_sankey_frames(kraken_df, domains, tax_levels):
         for tid, rank, name in zip(_tids, _ranks, _names)
     }
 
-    # Filter by domain via taxid subtree membership (order-independent).
-    children_map: dict = {}
-    for taxid, parent_taxid in taxid_to_parent.items():
-        children_map.setdefault(parent_taxid, []).append(taxid)
-
-    def _collect_subtree(root_taxid):
-        """Return the set of all taxids at or below root_taxid."""
-        result = set()
-        stack = [root_taxid]
-        while stack:
-            tid = stack.pop()
-            result.add(tid)
-            stack.extend(children_map.get(tid, []))
-        return result
-
-    domain_taxids_set = set()
-    for domain in domains:
-        domain_rows = kraken_df[kraken_df["name"].str.strip() == domain]
-        if domain_rows.empty:
-            continue
-        domain_taxid = int(domain_rows.iloc[0]["taxid"])
-        domain_taxids_set.update(_collect_subtree(domain_taxid))
-
+    domain_taxids_set = _domain_taxid_set(kraken_df, taxid_to_parent, domains)
     domain_df = kraken_df[kraken_df["taxid"].isin(domain_taxids_set)].copy()
     if domain_df.empty:
         return None
@@ -320,7 +320,14 @@ def _build_sankey_frames(kraken_df, domains, tax_levels):
     ).map(recalc_cumul).fillna(0).astype(int)
     domain_df["recalc_pct"] = domain_df["recalc_cumul"] / total_reads * 100
 
-    tax_df = domain_df[domain_df["rank"].isin(tax_levels)].copy()
+    # "Minimum DNA Sequences": hide any taxon whose cumulative reads fall
+    # below the value. A parent holds at least its children's reads, so the
+    # remaining tree stays connected. The argument used to be accepted and
+    # ignored here.
+    tax_df = domain_df[
+        domain_df["rank"].isin(tax_levels)
+        & (domain_df["recalc_cumul"] >= (min_reads or 0))
+    ].copy()
     return tax_df, domain_df, total_reads, taxid_to_parent, taxid_to_key
 
 
@@ -625,7 +632,7 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
             "Try the Ring View (Sunburst) or select more levels in Advanced Settings."
         )
 
-    frames = _build_sankey_frames(kraken_df, domains, tax_levels)
+    frames = _build_sankey_frames(kraken_df, domains, tax_levels, min_reads)
     if frames is None:
         return None
     tax_df, domain_df, total_reads, taxid_to_parent, taxid_to_key = frames
@@ -886,7 +893,10 @@ def _build_sunburst_nodes(filtered_df, tax_levels, total_reads, palette,
     parents.append("")
     values.append(0)
     colors.append("#E5E7EB")
-    custom_data.append(["Root", first_level_reads, 100.0])
+    custom_data.append([
+        "Root", first_level_reads,
+        (first_level_reads / total_reads * 100) if total_reads > 0 else 0.0,
+    ])
 
     added_ids = {"root"}
     for level_idx, level in enumerate(tax_levels):
@@ -1006,20 +1016,17 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config,
     logging.debug(f"Sunburst: Available ranks: {available_ranks}")
     logging.debug(f"Sunburst: Selected levels: {tax_levels}")
 
-    # Filter by tax_levels; apply min_reads only to Species.
-    level_filtered_df = kraken_df[kraken_df["rank"].isin(tax_levels)].copy()
-    if "S" in tax_levels:
-        filtered_df = level_filtered_df[
-            (level_filtered_df["rank"] != "S") |
-            (level_filtered_df["reads"] >= min_reads)
-        ].copy()
-    else:
-        filtered_df = level_filtered_df.copy()
-    logging.debug(f"Sunburst: {len(filtered_df)} rows after filtering")
-
-    if filtered_df.empty or not tax_levels:
-        logging.debug("Sunburst: No data after filtering")
-        return create_empty_sunburst("No data matches the selected filters")
+    # Filter by tax_levels, then by the selected domains (taxid subtree, as
+    # in the Sankey; skipped when the frame has no parent links to walk).
+    filtered_df = kraken_df[kraken_df["rank"].isin(tax_levels)].copy()
+    if domains and {"taxid", "parent_taxid"} <= set(kraken_df.columns):
+        in_domains = _domain_taxid_set(
+            kraken_df,
+            dict(zip(kraken_df["taxid"].astype(int),
+                     kraken_df["parent_taxid"].astype(int))),
+            domains,
+        )
+        filtered_df = filtered_df[filtered_df["taxid"].astype(int).isin(in_domains)]
 
     # Recalculate cumulative reads bottom-up so parent >= children even when
     # aggregating across multiple samples. Composite key f"{rank}_{name}"
@@ -1029,11 +1036,21 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config,
         filtered_df["rank"] + "_" + filtered_df["name"].str.strip()
     ).map(recalc_cumul).fillna(0).astype(int)
 
-    # Percentage base: the first level's recalculated total (column sum).
-    first_level_df = filtered_df[filtered_df["rank"] == tax_levels[0]]
-    total_reads = int(first_level_df["recalc_cumul"].sum()) if tax_levels else 1
-    if total_reads == 0:
-        total_reads = 1  # Avoid division by zero.
+    # "Minimum DNA Sequences" on CUMULATIVE reads at every level, as in the
+    # Sankey. It used to apply to species only and on the direct column, so
+    # a species whose reads all sit in its subspecies was dropped.
+    filtered_df = filtered_df[filtered_df["recalc_cumul"] >= (min_reads or 0)].copy()
+    logging.debug(f"Sunburst: {len(filtered_df)} rows after filtering")
+
+    if filtered_df.empty or not tax_levels:
+        logging.debug("Sunburst: No data after filtering")
+        return create_empty_sunburst("No data matches the selected filters")
+
+    # Percentage base: all reads in the sample, as for the Sankey and
+    # Kraken2's own %, so "Of total" and the Sankey's "Proportion" give one
+    # taxon one number. (It was the displayed first level's sum, which
+    # excludes unclassified reads and unselected domains.)
+    total_reads = _total_read_count(kraken_df) or 1
 
     # Authoritative parent lookup, same as the Sankey: walk the taxid parent
     # chain when those columns exist, else fall back to indentation.

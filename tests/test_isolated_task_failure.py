@@ -194,3 +194,18 @@ class TestFinalStatusOnDisk:
             "exit_code": 1,
         })
         assert bm.status["pipeline_status"] == "error"
+
+
+
+@pytest.mark.parametrize("workflow_status", [
+    {"processes_complete": 3, "processes_failed": 0, "exit_code": 0},
+    {"processes_complete": 2, "processes_failed": 1, "exit_code": 0},
+    {"processes_complete": 2, "processes_failed": 1, "exit_code": 1},
+    {"errors": ["boom"]},
+])
+def test_every_finished_run_records_its_end_time(bm, workflow_status):
+    """Only the stop path recorded ended_at, so the banner's elapsed time
+    for a completed or failed run kept counting after the run ended."""
+    bm.status.pop("ended_at", None)
+    _statuses(bm, workflow_status)
+    assert bm.status.get("ended_at")

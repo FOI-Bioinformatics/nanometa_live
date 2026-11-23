@@ -167,7 +167,6 @@
     "nanometa_live/core/utils/qc_loaders.py",
     "nanometa_live/core/utils/qc_loaders.py::_aggregate_seqkit_batches",
     "nanometa_live/core/utils/qc_loaders.py::_load_seqkit_incremental",
-    "nanometa_live/core/utils/qc_loaders.py::get_qc_stats",
     "nanometa_live/core/utils/qc_loaders.py::get_sample_statistics_summary",
     "nanometa_live/core/utils/qc_loaders.py::load_nanoplot_stats",
     "nanometa_live/core/utils/read_extractor.py::ReadExtractor.extract_reads_for_taxid",

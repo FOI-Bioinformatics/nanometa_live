@@ -35,13 +35,21 @@ def register_navigation(app, backend_manager):
             Input("welcome-shown", "data"),
             Input("close-welcome-modal", "n_clicks"),
         ],
+        State("app-config", "data"),
         prevent_initial_call="initial_duplicate",
     )
-    def manage_welcome_modal(already_shown, close_clicks):
-        """Show the welcome modal on first visit, dismiss on button click."""
+    def manage_welcome_modal(already_shown, close_clicks, config):
+        """Show the welcome modal on first visit, dismiss on button click.
+
+        Not in visualization-only mode: the modal walks through configure ->
+        prepare -> Start Analysis and suggests --main_dir, while that mode
+        has Start disabled and was itself opened with --main_dir.
+        """
         triggered = dash.ctx.triggered_id
         if triggered == "close-welcome-modal":
             return False, "config-tab"
+        if (config or {}).get("visualization_only"):
+            return False, no_update
         # Show on first visit only
         if not already_shown:
             return True, no_update

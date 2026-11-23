@@ -113,7 +113,7 @@ def test_badge_not_ready_critical(rd_app):
     fn = get_callback_fn(rd_app, "readiness-badge")
     children, color, _ = fn(_serialize_report(_fake_report(ready=False)))
     assert color == "danger"
-    assert "0/1 checks" in str(children)
+    assert "1 blocking" in str(children)
 
 
 def test_badge_not_configured(rd_app):

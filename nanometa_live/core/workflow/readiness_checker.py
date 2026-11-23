@@ -115,6 +115,28 @@ class ReadinessReport:
         }
 
 
+def _describe_network_failure(exc: BaseException) -> str:
+    """A short operator-facing reason for a failed connectivity probe.
+
+    The raw exception text ("<urlopen error timed out>") is kept in the
+    check's details; the message states what happened.
+    """
+    import socket
+    import ssl
+    import urllib.error
+
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if isinstance(reason, (socket.timeout, TimeoutError)):
+        return "did not respond within 5 s"
+    if isinstance(reason, socket.gaierror):
+        return "could not be found (DNS lookup failed)"
+    if isinstance(reason, ssl.SSLError):
+        return "refused a secure connection (certificate or TLS problem)"
+    if isinstance(reason, ConnectionRefusedError):
+        return "refused the connection"
+    return "is unreachable"
+
+
 class ReadinessChecker:
     """Validates prerequisites for offline Nanometa Live operation."""
 
@@ -237,7 +259,9 @@ class ReadinessChecker:
         report.checks.append(self._check_blast_dbs(config, home, active_watchlist))
 
         # === Informational ===
-        report.checks.append(self._check_nextflow_version())
+        nextflow_version = self._check_nextflow_version()
+        if nextflow_version is not None:
+            report.checks.append(nextflow_version)
         report.checks.append(self._check_nextflow_plugins(config))
         report.checks.append(self._check_offline_conda_cache(config))
         report.checks.extend(self._check_network_connectivity(config))
@@ -1093,7 +1117,7 @@ class ReadinessChecker:
 
     # -- Informational checks --
 
-    def _check_nextflow_version(self) -> CheckResult:
+    def _check_nextflow_version(self) -> Optional[CheckResult]:
         """Check Nextflow against the real toolchain floor.
 
         nanometanf's manifest floors at ``_NEXTFLOW_MIN_VERSION`` (26.04.0,
@@ -1138,10 +1162,10 @@ class ReadinessChecker:
                 "Could not parse Nextflow version from output",
             )
         except FileNotFoundError:
-            return CheckResult(
-                "Nextflow Version", False, Severity.WARNING,
-                "Nextflow not found (checked separately in tool checks)",
-            )
+            # The tool check already reports a missing nextflow as CRITICAL;
+            # a second row for the same cause made the checklist read worse
+            # than it is. None = no row.
+            return None
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
                 PermissionError, OSError):
             return CheckResult(
@@ -1181,6 +1205,8 @@ class ReadinessChecker:
             ("NCBI API", "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"),
             ("GTDB API", "https://api.gtdb.ecogenomic.org/"),
         ]
+        import urllib.error
+
         for name, url in endpoints:
             try:
                 urllib.request.urlopen(url, timeout=5)  # noqa: S310
@@ -1188,15 +1214,24 @@ class ReadinessChecker:
                     name, True, Severity.INFO,
                     f"{name} reachable",
                 ))
+            except urllib.error.HTTPError as e:
+                # The server answered: reachable. NCBI's eutils root answers
+                # a bare GET with 400, which was reported as "unreachable".
+                results.append(CheckResult(
+                    name, True, Severity.INFO,
+                    f"{name} reachable (HTTP {e.code} to the probe)",
+                ))
             except Exception as e:
-                # Connectivity probe: any failure (URLError, HTTPError, socket
+                # Connectivity probe: any other failure (URLError, socket
                 # error, SSL issue, timeout, proxy misconfiguration, even a
                 # surprising upstream exception) means "unreachable" for the
                 # operator. Keep broad catch so the readiness report stays
                 # useful regardless of why the probe failed.
                 results.append(CheckResult(
                     name, False, Severity.WARNING,
-                    f"{name} unreachable: {e}. Genome downloads may fail.",
+                    f"{name} {_describe_network_failure(e)}. "
+                    "Genome downloads may fail.",
+                    details=str(e),
                 ))
         return results
 
@@ -1223,10 +1258,10 @@ class ReadinessChecker:
         if not source:
             return CheckResult(
                 "Pipeline Source", False, Severity.CRITICAL,
-                "No pipeline_source configured. Set pipeline_source in "
-                "config.yaml to 'remote:dev' or a local path (e.g. "
-                "'local:/path/to/nanometanf'); otherwise the pipeline "
-                "cannot be launched.",
+                "No pipeline source is set, so the pipeline cannot be "
+                "launched. Choose one in the Configuration tab (a remote "
+                "branch such as dev, or a local nanometanf checkout), or set "
+                "pipeline_source in the config file.",
             )
         # Strip "local:" prefix if present (used by nextflow_manager convention)
         normalized = source

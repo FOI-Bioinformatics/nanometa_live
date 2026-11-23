@@ -46,7 +46,10 @@ def create_header(title="Nanometa Live"):
                         style={"display": "none", "fontSize": "0.7rem"}
                     ),
                 ], className="d-flex align-items-center")
-            ], width=4),
+            # Content-sized outer columns: with fixed 4/5/3 widths the
+            # controls overflowed a quarter of a 1366 px screen and spilled
+            # over the status text. The status column takes what remains.
+            ], width="auto"),
 
             # Status indicators
             dbc.Col([
@@ -108,7 +111,7 @@ def create_header(title="Nanometa Live"):
                         ], className="pipeline-info ms-3", id="pipeline-stage-container", style={"display": "none"})
                     ], className="d-flex align-items-center flex-wrap", **{"aria-label": "Analysis status"})
                 ], className="d-flex justify-content-center h-100")
-            ], width=5),
+            ], style={"minWidth": 0}),
 
             # Control buttons
             dbc.Col([
@@ -196,8 +199,8 @@ def create_header(title="Nanometa Live"):
                         title="Begin analysing DNA samples for organisms of interest",
                     ),
                 ], className="d-flex justify-content-end align-items-center")
-            ], width=3)
-        ], className="py-3 border-bottom"),
+            ], width="auto")
+        ], className="py-3 border-bottom align-items-center"),
 
         # Stop Analysis Confirmation Modal
         dbc.Modal([

@@ -25,6 +25,7 @@ from nanometa_live.core.utils.qc_loaders import (
     load_fastp_card_payloads,
     load_fastp_data,
     load_seqkit_stats,
+    summarize_seqkit_rows,
 )
 from nanometa_live.app.components.organism_components import (
     BaseQualityCard,
@@ -822,9 +823,9 @@ def register_qc_callbacks(app: Dash):
                 seqkit_df = load_seqkit_stats(main_dir, selected_sample)
                 if not seqkit_df.empty:
                     source = "seqkit"
-                    mean_length = float(seqkit_df['avg_len'].mean()) if 'avg_len' in seqkit_df.columns else 0.0
-                    n50 = int(seqkit_df['N50'].mean()) if 'N50' in seqkit_df.columns else None
-                    gc_content = float(seqkit_df['GC(%)'].mean()) if 'GC(%)' in seqkit_df.columns else None
+                    summary = summarize_seqkit_rows(seqkit_df)  # n50 None if pooled
+                    mean_length, n50, gc_content = (
+                        summary["mean_length"], summary["n50"], summary["gc_percent"])
 
             # If no data, show empty state
             if mean_length == 0:
@@ -994,7 +995,7 @@ def register_qc_callbacks(app: Dash):
                 if "avg_len" in seqkit_data.columns:
                     rows.append({
                         "metric": "Average Read Length",
-                        "value": f"{seqkit_data['avg_len'].mean():.0f}",
+                        "value": f"{summarize_seqkit_rows(seqkit_data)['mean_length']:.0f}",
                     })
 
             if not rows:

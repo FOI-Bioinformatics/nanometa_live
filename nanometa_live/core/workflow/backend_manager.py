@@ -1115,6 +1115,52 @@ class BackendManager:
     # docs/audit-2026-04-28-throughput-gui.md.
     _FILE_COUNT_TTL_SECONDS = 5.0
 
+    @staticmethod
+    def _scan_input_dir(d, extensions, memo):
+        """(read-file count, newest read-file mtime) for one input directory.
+
+        A directory whose own mtime is unchanged has gained, lost and renamed
+        nothing, so its count from the memo stands and only its newest file
+        is re-stat'ed (an append to the latest file still moves the auto-stop
+        anchor). Otherwise the directory is listed and every read file
+        stat'ed, as before. Listing and stat'ing every FASTQ on every
+        refresh cost 113 ms at 96 barcodes x 500 files, inside the status
+        lock. Returns None when the directory cannot be read.
+        """
+        try:
+            dir_mtime = os.stat(d).st_mtime_ns
+        except OSError:
+            memo.pop(d, None)
+            return None
+        cached = memo.get(d)
+        if cached is not None and cached[0] == dir_mtime:
+            _, count, newest_name, newest = cached
+            if newest_name is not None:
+                try:
+                    newest = max(newest, os.stat(os.path.join(d, newest_name)).st_mtime)
+                except OSError:
+                    memo.pop(d, None)   # vanished: rescan next time
+                    return count, newest
+                memo[d] = (dir_mtime, count, newest_name, newest)
+            return count, newest
+        try:
+            names = os.listdir(d)
+        except OSError:
+            return None
+        count, newest, newest_name = 0, 0.0, None
+        for f in names:
+            if not f.endswith(extensions):
+                continue
+            count += 1
+            try:
+                mt = os.stat(os.path.join(d, f)).st_mtime
+            except OSError:
+                continue
+            if mt >= newest:
+                newest, newest_name = mt, f
+        memo[d] = (dir_mtime, count, newest_name, newest)
+        return count, newest
+
     def _update_file_counts(self):
         """Update the file processing counts from the file system."""
         try:
@@ -1144,20 +1190,15 @@ class BackendManager:
                     find_sample_subdirs,
                 )
                 dirs = [nanopore_dir] + [str(d) for d in find_sample_subdirs(nanopore_dir)]
+                memo = getattr(self, "_input_dir_memo", None)
+                if memo is None:
+                    memo = self._input_dir_memo = {}
                 for d in dirs:
-                    try:
-                        names = os.listdir(d)
-                    except OSError:
+                    scanned = self._scan_input_dir(d, extensions, memo)
+                    if scanned is None:
                         continue
-                    here = 0
-                    for f in names:
-                        if not f.endswith(extensions):
-                            continue
-                        here += 1
-                        try:
-                            newest_mtime = max(newest_mtime, os.stat(os.path.join(d, f)).st_mtime)
-                        except OSError:
-                            continue
+                    here, dir_newest = scanned
+                    newest_mtime = max(newest_mtime, dir_newest)
                     waiting_files += here
                     if d == nanopore_dir:
                         root_files = here
@@ -1358,6 +1399,11 @@ class BackendManager:
             # asked for. stop() owns the report, so do not signal completion.
             self._finish_stopped_locked(self._stop_intent)
             return False
+
+        # Every terminal path records when the run ended (the stop path
+        # does so in _finish_stopped_locked); the banner's elapsed time and
+        # the run file read it.
+        self.status["ended_at"] = datetime.now().isoformat(timespec="seconds")
 
         workflow_errors = workflow_status.get("errors", [])
         if workflow_errors:

@@ -89,6 +89,22 @@ class TestActionRequired:
         assert "2 of 9 watched pathogens above alert threshold" in d.subtitle
         assert "pending confirmatory validation" in d.subtitle
 
+    def test_subtitle_count_matches_the_named_pathogens(self):
+        """The count must describe the list printed under it.
+
+        The banner names critical and high hits only ("Above threshold:"),
+        but the count included moderate-tier hits, so a banner could read
+        "3 of ..." above one named organism. Moderate hits are counted
+        separately.
+        """
+        d = verdict(dangerous=[{"threat_level": "critical"},
+                               {"threat_level": "moderate"},
+                               {"threat_level": "moderate"}],
+                    n_watched=9, validation_has_results=True)
+        assert d.subtitle.startswith(
+            "1 of 9 watched pathogens above alert threshold")
+        assert "2 moderate-risk" in d.subtitle
+
     def test_subtitle_omits_note_when_validated(self):
         d = verdict(dangerous=[{"threat_level": "critical"}],
                     validation_has_results=True)

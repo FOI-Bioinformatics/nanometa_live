@@ -305,6 +305,11 @@ def clear_all_loader_caches():
     from nanometa_live.app.utils.batch_progress import clear_batch_progress_memo
 
     clear_batch_progress_memo()
+    # Same reason: the freshness map is keyed on the results fingerprint,
+    # which a new run into the same directory can repeat while empty.
+    from nanometa_live.app.utils.freshness import clear_freshness_memo
+
+    clear_freshness_memo()
     # Parser singletons carry per-run result caches; a run switch must not
     # let the previous run's validation answer the new one's first tick.
     reset_validation_parsers()

@@ -96,7 +96,7 @@ class TestHeaderPill:
                  "summary": {"passed": 0, "total": 1, "critical_failures": 1}}
         children, color, _popover = render(state)
         assert color == "danger"
-        assert "0/1 checks" in _text(children)
+        assert "1 blocking" in _text(children)
 
     def test_warning_only_is_warning(self, render):
         state = {"ready": False,

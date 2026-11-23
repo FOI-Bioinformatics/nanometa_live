@@ -58,6 +58,59 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   forwarded its click to the header button even when that was disabled
   (visualization-only mode, failed readiness), and during a run, when the
   header button is Stop, it opened the stop prompt.
+- The header throughput tile reports a stall. Its rate window holds about
+  50 s of ticks and the stall threshold is 120 s, so from the window alone
+  a run whose reads stopped read "idle" for ever; the last-progress time is
+  now carried across ticks.
+- The Dashboard alerts panel no longer raises CRITICAL "0.0% of sequences
+  classified" before any data exists (an unmeasured rate was read as 0.0),
+  and the "Analysis completed" alert can fire: the run status it needs was
+  read from keys the status cache never carried.
+- The ACTION REQUIRED count matches the organisms named under it. It
+  included moderate-tier hits, which are now stated separately ("plus N
+  moderate-risk").
+- Alert-card confidence uses the Pathogen Report modal's bands, and a
+  MODERATE card draws an amber bar (the component tested for "MEDIUM" and
+  drew the red bar of LOW).
+- The banner's elapsed time stops at the end of a completed or failed run.
+  Only a stopped run recorded its end time.
+- Pooled QC statistics are weighted. "All Samples" read length, quality,
+  Q20/Q30 and GC were plain means across samples, so a 10-read sample
+  counted as much as a 1,000-read one; mean length is now total bases over
+  total reads and the per-base figures are base-weighted. An N50 or median
+  that cannot be derived (several samples, or summed real-time batches,
+  including nanometanf's merged seqkit row) is shown as unknown rather than
+  as the largest N50, the mean of N50s, or the mean read length.
+- The Taxonomy filters apply to both charts. "Minimum DNA Sequences" was
+  ignored by the Sankey and applied to direct reads of species only in the
+  Sunburst; both now hide taxa below the value on cumulative reads. The
+  Sunburst honours the Domain selection, and its "Of total" is a share of
+  all reads, as is the Sankey's "Proportion".
+- In visualization-only mode the Validation tab says whether the folder
+  holds validation results instead of "Validation is disabled. Enable it in
+  the Configuration tab" beside a form showing it enabled, and the setup
+  welcome dialog is not shown.
+- The Configuration tab is not marked Modified on a fresh load: a key the
+  saved configuration lacks is compared with the default the form shows.
+- A page load no longer rewrites last-session.yaml. Dash re-fires the
+  watchlist file toggles when they are added to the page, and each re-fire
+  was applied and saved, which also flipped the header badge to Auto-saved.
+- The readiness checklist states its warnings and critical failures beside
+  the passed count, and the header pill names what blocks ("4 blocking")
+  instead of "17/25 checks". A missing Nextflow is reported once, an HTTP
+  error from the NCBI probe counts as reachable (the host answered), other
+  network failures are described in plain words, and the Pipeline Source
+  message points to the Configuration tab.
+- Threat-level badges render in their level's colour. Bootstrap's default
+  badge class overrode the inline colour, so every badge was grey and
+  Moderate's dark text on grey was hard to read.
+- The header lays out at 1366 px without the status text running under
+  the Offline switch, and wraps at narrow widths.
+- Per-tick cost: the per-sample freshness map is reused while the results
+  fingerprint is unchanged (it scanned every batch-report directory each
+  tick, 86-98 ms at 96 barcodes x 300 batches), and input-file counting
+  re-lists only directories whose mtime changed (113 ms per refresh at 96 x
+  500 files, inside the status lock).
 
 ### Changed
 

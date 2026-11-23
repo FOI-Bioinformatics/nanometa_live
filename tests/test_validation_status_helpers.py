@@ -116,3 +116,38 @@ def test_db_status_none_does_not_crash():
     s = _status(db_status=None)
     # no missing info available -> falls through to running/waiting branches
     assert s.code in {"waiting", "running_realtime", "running_batch"}
+
+
+# --- Visualization-only mode and the default ---------------------------------
+#
+# Live walk (2026-11-23 bug hunt): opened with --main_dir, the Validation tab
+# said "Validation is disabled. Enable it in the Configuration tab" while the
+# Configuration tab showed "Enable confirmation testing" switched on. The tab
+# read blast_validation with a False default, the form and default_config()
+# with True, and the visualization config carries no such key. In
+# visualization-only mode the setting describes the NEXT run in any case;
+# what the folder holds is the answer.
+
+def test_visualization_mode_without_results_says_the_folder_has_none():
+    s = _status(blast_enabled=False, visualization_only=True, has_results=False)
+    assert s.code == "no_results_viz"
+    assert "Configuration" not in s.detail
+
+
+def test_visualization_mode_with_results_shows_them():
+    s = _status(blast_enabled=False, visualization_only=True,
+                has_results=True, results_count=3)
+    assert s.code == "results"
+
+
+def test_payload_takes_the_default_when_the_key_is_absent():
+    from nanometa_live.app.tabs.validation_status_helpers import (
+        build_validation_status_payload,
+    )
+    from nanometa_live.core.config.config_loader import default_config
+
+    assert default_config()["blast_validation"] is True
+    payload = build_validation_status_payload(
+        {"processing_mode": "batch"}, results_dir_ok=True,
+        backend_status={}, has_results=False, results_count=0)
+    assert payload["code"] != "disabled"

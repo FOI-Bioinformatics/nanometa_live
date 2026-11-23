@@ -194,8 +194,11 @@ def reset_caches() -> None:
 
     from nanometa_live.app.utils.batch_progress import clear_batch_progress_memo
 
+    from nanometa_live.app.utils.freshness import clear_freshness_memo
+
     bvp.reset_validation_parsers()
     clear_batch_progress_memo()
+    clear_freshness_memo()
     staleness.clear()
     sbc.clear_seqkit_batch_cache()
     racc.clear_sample_accum_cache()

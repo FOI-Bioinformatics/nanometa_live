@@ -39,9 +39,7 @@ from nanometa_live.app.utils.debounce import (
     mark_rendered,
 )
 from nanometa_live.app.utils.throughput import (
-    BUFFER_LIMIT,
-    append_tick,
-    classify_state,
+    advance_throughput,
     compute_rates,
     format_age_seconds,
     last_nonzero_delta_ts,
@@ -214,6 +212,12 @@ def register_dashboard_callbacks(app: Dash):
             overall_status["_main_dir"] = main_dir
             overall_status["_samples_data"] = _collect_samples_data(main_dir, available_samples)
             overall_status["_available_samples"] = available_samples
+            # Run state for the alerts panel (see _generate_alerts).
+            overall_status["_backend"] = {
+                key: (status or {}).get(key)
+                for key in ("running", "completed", "processes_failed",
+                            "files_processed")
+            }
             return overall_status
         except Exception as e:
             logger.error(f"Error computing overall status cache: {e}", exc_info=True)
@@ -292,7 +296,9 @@ def register_dashboard_callbacks(app: Dash):
         pipeline_running = status.get("running", False) if status else False
         pipeline_completed = status.get("completed", False) if status else False
         start_time = status.get("start_time") if status else None
-        time_elapsed = _format_time_elapsed(start_time)
+        ended_at = (status.get("ended_at")
+                    if status and not pipeline_running else None)
+        time_elapsed = _format_time_elapsed(start_time, ended_at)
         last_updated_str = "Last updated " + datetime.now().strftime("%H:%M:%S")
         # U3: realtime-timeout countdown. Surfaced inside the verdict
         # banner's right column when the pipeline is running and the
@@ -1430,7 +1436,6 @@ def register_dashboard_callbacks(app: Dash):
         if buffer_dir is not None and buffer_dir != current_dir:
             buffer = {}
 
-        ticks = list((buffer or {}).get("ticks", []) or [])
         running = bool(status and status.get("running"))
 
         total_reads = 0
@@ -1448,29 +1453,34 @@ def register_dashboard_callbacks(app: Dash):
                 total_files = 0
 
         now = _time.time()
-        new_ticks = append_tick(ticks, now, total_reads, total_files)
+        # advance_throughput carries the last-progress time across ticks:
+        # the rate window is shorter than the stall threshold, so from the
+        # window alone a stalled run read "idle" for ever.
+        new_buffer, state = advance_throughput(
+            buffer, now, total_reads, total_files, running)
+        new_ticks = new_buffer["ticks"]
         rpm, fpm = compute_rates(new_ticks)
-        state = classify_state(new_ticks, now, running)
-
-        new_buffer = {
-            "dir": current_dir,
-            "ticks": new_ticks,
-            "reads_per_min": rpm,
-            "files_per_min": fpm,
-            "stalled_since": (
-                last_nonzero_delta_ts(new_ticks) if state == "stalled" else None
+        new_buffer.update(
+            dir=current_dir,
+            reads_per_min=rpm,
+            files_per_min=fpm,
+            stalled_since=(
+                new_buffer.get("last_progress") if state == "stalled" else None
             ),
-        }
+        )
 
         children, class_name = _render_throughput_tile(
-            state, rpm, fpm, new_ticks, now
+            state, rpm, fpm, new_ticks, now,
+            last_progress=new_buffer.get("last_progress"),
+            watch_since=new_buffer.get("watch_since"),
         )
         return children, class_name, new_buffer
 
 # Helper functions
 
 
-def _render_throughput_tile(state, rpm, fpm, ticks, now):
+def _render_throughput_tile(state, rpm, fpm, ticks, now,
+                            last_progress=None, watch_since=None):
     """(children, className) for the header throughput tile."""
     if state == "idle":
         return (
@@ -1482,7 +1492,10 @@ def _render_throughput_tile(state, rpm, fpm, ticks, now):
             "throughput-tile ms-3 small text-muted",
         )
     if state == "stalled":
-        last_progress = last_nonzero_delta_ts(ticks)
+        if last_progress is None:
+            last_progress = last_nonzero_delta_ts(ticks)
+        if last_progress is None:
+            last_progress = watch_since
         age = (now - last_progress) if last_progress else (
             now - float(ticks[0]["ts"]) if ticks else 0
         )

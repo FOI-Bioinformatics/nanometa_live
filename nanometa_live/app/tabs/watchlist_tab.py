@@ -480,6 +480,15 @@ def register_watchlist_callbacks(app: Dash) -> None:
             if id_dict.get("index") == changed_id:
                 changed_value = value
                 break
+        # Spurious-fire guard, as in toggle_nested_pathogen: Dash re-fires
+        # this ALL callback when the toggles are ADDED to the layout (page
+        # load, list re-render) with their current values. Without it every
+        # page load "applied" the current state and rewrote
+        # last-session.yaml, flipping the header badge to Auto-saved with
+        # no operator action.
+        if changed_id and bool(changed_value) == (
+                changed_id in manager.get_enabled_watchlists()):
+            raise PreventUpdate
         if changed_id:
             if changed_value:
                 manager.enable_watchlist(changed_id)
