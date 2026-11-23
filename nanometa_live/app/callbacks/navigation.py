@@ -499,9 +499,11 @@ def register_navigation(app, backend_manager):
         Output("start-stop-button", "n_clicks", allow_duplicate=True),
         Input("preparation-start-analysis-btn", "n_clicks"),
         State("start-stop-button", "n_clicks"),
+        State("start-stop-button", "disabled"),
+        State("backend-status", "data"),
         prevent_initial_call=True,
     )
-    def proxy_preparation_start_to_header(n_prep, n_header):
+    def proxy_preparation_start_to_header(n_prep, n_header, header_disabled, status):
         """Proxy the Preparation-tab Start Analysis button into the
         header's start-stop-button.
 
@@ -511,7 +513,33 @@ def register_navigation(app, backend_manager):
         and backend-launch flow as if the operator had clicked the
         header button. Keeping the launch logic single-sourced
         avoids accidental drift between the two CTAs.
+
+        Only while the header button would itself act as Start: bumping the
+        n_clicks of a DISABLED button (visualization-only mode, failed
+        readiness) got around the disable, and during a run the header
+        button is Stop, so a click labelled Start opened the stop prompt.
         """
         if not n_prep:
             raise PreventUpdate
+        if header_disabled or (status or {}).get("running", False):
+            raise PreventUpdate
         return (n_header or 0) + 1
+
+    @app.callback(
+        Output("preparation-start-analysis-btn", "disabled"),
+        Output("preparation-start-analysis-btn", "title"),
+        Input("start-stop-button", "disabled"),
+        Input("backend-status", "data"),
+    )
+    def mirror_header_start_availability(header_disabled, status):
+        """Disable the Preparation-tab Start when the header Start cannot start.
+
+        The header's own disabled state already encodes visualization-only
+        mode and readiness; a run in progress is added here because the
+        header button is then an enabled Stop.
+        """
+        if (status or {}).get("running", False):
+            return True, "An analysis is already running"
+        if header_disabled:
+            return True, "Start is not available - see the header button for the reason"
+        return False, "Begin processing the nanopore sequence data"

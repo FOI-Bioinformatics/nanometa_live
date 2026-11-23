@@ -1193,13 +1193,19 @@ def _sample_fingerprint_paths(kraken_dir: str, sample: Optional[str]) -> List[st
 def _aggregate_to_result_df(agg: Dict[int, List], ordered_taxids: List[int]) -> pd.DataFrame:
     """Build the result DataFrame from the per-taxid accumulation dict.
 
-    Each row's percentage is computed from the summed read total across taxids.
+    The ``%`` column keeps Kraken2's definition, the clade share: reads at the
+    node and below (``cumul_reads``) over all reads. The denominator is the
+    sum of DIRECT reads over every row, unclassified included, which is the
+    total read count because each read is assigned directly to exactly one
+    node. Using direct reads in the numerator as well understated every
+    internal node (a genus showed only its unresolved reads, root 0.0%), so
+    the aggregate disagreed with a single-sample load of the same data.
     """
     total_reads = sum(v[0] for v in agg.values())
     result_rows = []
     for taxid in ordered_taxids:
         reads, cumul, rank, name, parent_taxid = agg[taxid]
-        pct = round((reads / total_reads) * 100, 2) if total_reads > 0 else 0.0
+        pct = round((cumul / total_reads) * 100, 2) if total_reads > 0 else 0.0
         result_rows.append({
             '%': pct,
             'cumul_reads': cumul,

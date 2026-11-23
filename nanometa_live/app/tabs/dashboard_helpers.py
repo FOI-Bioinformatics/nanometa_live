@@ -1627,22 +1627,27 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
             total_bases = 0
             mean_q = 0.0
             n50 = 0
-            class_rate = 0.0
+            class_rate: Optional[float] = None
             pass_rate = 100.0
 
             if not kraken_df.empty:
-                # Calculate sample metrics from Kraken
-                reads = int(kraken_df["reads"].sum())
+                # Same definition as the Dashboard tile: root + unclassified
+                # cumulative reads (never kraken_df["reads"].sum()).
+                classified_reads, unclassified_reads, rate = get_classification_stats(kraken_df)
+                reads = classified_reads + unclassified_reads
                 org_df = kraken_df[kraken_df["rank"].isin(["S", "G"])]
                 org_df = org_df[org_df["taxid"] > 1]
                 organisms = len(org_df[org_df["reads"] >= 1])
 
-                # Classification rate calculation
-                unclassified = kraken_df[kraken_df["name"].str.contains("unclassified", case=False, na=False)]
-                if not unclassified.empty and reads > 0:
-                    unclassified_pct = (unclassified["reads"].sum() / reads) * 100
-                    class_rate = 100.0 - unclassified_pct
-
+                if reads == 0:
+                    # A report with no reads (nanometanf's placeholder for a
+                    # sample that produced nothing) is not a result: it must
+                    # not be graded, least of all as the best grade.
+                    quality = "No reads"
+                    status = "No reads"
+                else:
+                    class_rate = rate
+                    unclassified_pct = 100.0 - rate
                     if unclassified_pct < 30:
                         quality = "Good"
                         status = "Complete"
@@ -1652,10 +1657,6 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
                     else:
                         quality = "Poor"
                         status = "Issue Detected"
-                else:
-                    quality = "Excellent"
-                    status = "Complete"
-                    class_rate = 100.0
 
             # Try seqkit stats FIRST (per-sample data from chopper QC)
             seqkit_df = load_seqkit_stats(main_dir, sample)
@@ -1703,7 +1704,8 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
                 "bases": bases_str,
                 "mean_q": f"{mean_q:.1f}" if mean_q > 0 else "--",
                 "n50": n50_str,
-                "class_rate": f"{class_rate:.1f}%" if class_rate > 0 else "--",
+                # A measured 0.0% is shown as such; "--" means not measured.
+                "class_rate": f"{class_rate:.1f}%" if class_rate is not None else "--",
                 "pass_rate": f"{pass_rate:.1f}%",
             })
 

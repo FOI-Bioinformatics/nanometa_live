@@ -288,7 +288,7 @@ def create_dashboard_layout():
                                                     },
                                                 },
                                                 {
-                                                    "condition": "params.value === 'Needs Review'",
+                                                    "condition": "params.value === 'Needs Review' || params.value === 'No reads'",
                                                     "style": {
                                                         "backgroundColor": "#fff3cd",
                                                         "color": "#664d03",

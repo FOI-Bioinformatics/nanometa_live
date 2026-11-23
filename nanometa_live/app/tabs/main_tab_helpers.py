@@ -303,27 +303,39 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
             if name_key:
                 name_lookup[name_key] = entry
 
-    # Build result list from ALL active watchlist entries
+    # Build result list from ALL active watchlist entries. One row per
+    # ENTRY: active_entries is keyed by the manager's identity key, which
+    # separates entries sharing an NCBI taxid but naming different database
+    # nodes (E. coli / E. coli_E / E. coli_F all carry 562). Deduplicating on
+    # the NCBI taxid here kept one of them and dropped the rest.
     result = []
     seen_taxids = set()
+    entries_per_taxid = {}
+    for entry in active_entries.values():
+        entries_per_taxid[entry.taxid] = entries_per_taxid.get(entry.taxid, 0) + 1
 
     for entry_id, entry in active_entries.items():
-        if entry.taxid in seen_taxids:
-            continue
         seen_taxids.add(entry.taxid)
 
         # Try to find detection in Kraken2 data
-        # 1. Check by NCBI taxid directly
-        # 2. Check by mapped Kraken2 db_taxid
-        # 3. Check by species name (fallback; matches the matching
-        #    strategy used by filter_detected_species so the badge
-        #    count and the cards-render path agree).
+        # 1. The entry's own database node, when it names one
+        # 2. The NCBI taxid directly, unless several entries share it (the
+        #    shared taxid resolves to ONE of their nodes, so a variant would
+        #    borrow a sibling's reads)
+        # 3. The mapped Kraken2 db_taxid
+        # 4. Species name (fallback; matches the matching strategy used by
+        #    filter_detected_species so the badge count and the
+        #    cards-render path agree).
         detection = None
-        db_taxid = ncbi_to_db.get(entry.taxid, entry.taxid)
+        own_db_taxid = ncbi_to_db.get(entry_id)
+        db_taxid = own_db_taxid or ncbi_to_db.get(entry.taxid, entry.taxid)
+        shared_taxid = entries_per_taxid.get(entry.taxid, 0) > 1
 
-        if entry.taxid in kraken_lookup:
+        if own_db_taxid and own_db_taxid in kraken_lookup:
+            detection = kraken_lookup[own_db_taxid]
+        elif not shared_taxid and entry.taxid in kraken_lookup:
             detection = kraken_lookup[entry.taxid]
-        elif db_taxid in kraken_lookup:
+        elif not shared_taxid and db_taxid in kraken_lookup:
             detection = kraken_lookup[db_taxid]
         else:
             name_key = (entry.name or '').strip().lower()

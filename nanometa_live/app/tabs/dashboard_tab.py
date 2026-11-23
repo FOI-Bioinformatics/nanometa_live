@@ -866,9 +866,12 @@ def register_dashboard_callbacks(app: Dash):
         # triggers (fingerprint change, watchlist toggle) always render.
         if interval_tick_is_redundant(ctx, "dashboard_pathogen_alert", _fingerprint):
             raise PreventUpdate
-        mark_rendered("dashboard_pathogen_alert", _fingerprint)
+        # Stamp the memo only after the debounce: a debounced trigger never
+        # reached the screen, and recording it as rendered made every
+        # backstop tick for the memo TTL (120 s) skip the refresh.
         if should_skip_update("dashboard_pathogen_alert", debounce_ms=2000):
             raise PreventUpdate
+        mark_rendered("dashboard_pathogen_alert", _fingerprint)
 
         if not config:
             return html.Div(), {"display": "none"}

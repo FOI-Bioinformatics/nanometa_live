@@ -124,6 +124,15 @@ def _get_parse_lock(cache_key: str) -> threading.Lock:
         return lock
 
 
+def _stability_window_seconds(wait_ms: int = FILE_STABILITY_CHECK_INTERVAL_MS) -> float:
+    """Age below which a file counts as possibly mid-write (see below).
+
+    Shared by ``_is_file_stable`` and ``check_data_freshness`` so the
+    fingerprint's settling marker covers exactly the files the loaders skip.
+    """
+    return max(wait_ms / 1000.0, 1.0)
+
+
 def _is_file_stable(filepath: str, wait_ms: int = FILE_STABILITY_CHECK_INTERVAL_MS) -> bool:
     """
     Check if a file is stable (not currently being written to).
@@ -155,7 +164,7 @@ def _is_file_stable(filepath: str, wait_ms: int = FILE_STABILITY_CHECK_INTERVAL_
 
         # File is stable if its mtime is older than the threshold
         age_seconds = time.time() - stat_result.st_mtime
-        threshold_seconds = max(wait_ms / 1000.0, 1.0)
+        threshold_seconds = _stability_window_seconds(wait_ms)
 
         if age_seconds < threshold_seconds:
             logging.debug(f"File modified {age_seconds:.2f}s ago, may still be written: {filepath}")
@@ -551,11 +560,29 @@ def check_data_freshness(main_dir: str) -> str:
     # outdirs, or one emptied by Archive) would otherwise fail to bump the
     # epoch on a switch -- and every mtime-cache entry stamped with the
     # current epoch keeps answering without a filesystem check.
+    #
+    # A subdirectory whose newest file is still inside the loaders' stability
+    # window carries a ":settling" marker. The loaders skip such a file, so a
+    # poll landing in the window renders without it; the file then settles by
+    # time passing, which changes no mtime. Without the marker the
+    # fingerprint stayed put and every rendered-fingerprint memo judged later
+    # refreshes redundant, leaving panels on the previous batch until the next
+    # file arrived (never, for the last file of a run). The marker's removal
+    # is the change that re-renders them. Only the newest file needs checking:
+    # every other file is older. A saturated walk reports a time bucket rather
+    # than a file mtime, so it is never marked.
+    now = time.time()
+    window = _stability_window_seconds()
     parts = [main_dir]
     for subdir in RESULTS_WATCHED_SUBDIRS:
         dirpath = os.path.join(main_dir, subdir)
         mt, n_files = _get_dir_latest_mtime(dirpath)
-        parts.append(f"{subdir}:{mt}:{n_files}")
+        settling = (
+            mt > 0
+            and n_files <= _MAX_FINGERPRINT_FILES
+            and now - mt < window
+        )
+        parts.append(f"{subdir}:{mt}:{n_files}{':settling' if settling else ''}")
 
     raw = "|".join(parts)
     fingerprint = hashlib.md5(raw.encode()).hexdigest()

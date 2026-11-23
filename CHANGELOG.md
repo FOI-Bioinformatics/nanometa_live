@@ -23,6 +23,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   worker process took to start before the body's guard could decline. A
   main-process gate now admits only a genuine click and writes a request
   Store the worker fires from.
+- Genome coverage breadth is computed per reference sequence. A reference
+  made of several records (chromosome and plasmids, or a draft in contigs)
+  had its intervals merged into one coordinate space and its length taken
+  from the longest record, so the breadth behind the 5% "confirmed" gate
+  could disagree with the coverage plots for the same organism.
+- The "All Samples" `%` column is the clade share, as in a Kraken2 report.
+  The aggregate divided direct reads by the total, so a genus showed only
+  its unresolved reads and root and domain read 0.0%, and the Organisms
+  tab's minimum-abundance filter kept different rows than for one sample.
+- Sankey proportions are shares of all reads. The total summed cumulative
+  reads over every rank, which counts each read once per rank, so every
+  percentage was several times too low.
+- Sunburst sectors count each read once. Node values are cumulative, but
+  the chart used `branchvalues="remainder"`, which adds a parent's value on
+  top of its children's: deeper branches outweighed shallower ones and the
+  "Of parent group" figure was wrong.
+- A sample whose report holds no reads is shown as "No reads" in the
+  Dashboard sample table, not "Excellent / Complete / 100.0%". The table's
+  read count and match rate use the same definition as the dashboard tile.
+- Watchlist cards keep one row per entry. Entries sharing an NCBI taxid but
+  naming different database nodes (*E. coli*, *E. coli_E*, *E. coli_F*)
+  were collapsed into one card, which dropped a variant above its threshold
+  from the Detected cards; each now reads its own node.
+- The pathogen alert panel no longer stays stale for up to two minutes when
+  two triggers arrive within its 2 s debounce: the dropped render was
+  recorded as shown before the debounce declined it.
+- The Organisms, QC and Validation panels show the last batch of a run. A
+  poll landing within a second of a new report rendered without it (the
+  loaders skip a file that may be mid-write) and recorded the fingerprint
+  as rendered; the file then settled without changing the fingerprint. The
+  fingerprint now marks a subdirectory whose newest file is still settling.
+- The Preparation tab's Start Analysis button follows the header button. It
+  forwarded its click to the header button even when that was disabled
+  (visualization-only mode, failed readiness), and during a run, when the
+  header button is Stop, it opened the stop prompt.
 
 ### Changed
 

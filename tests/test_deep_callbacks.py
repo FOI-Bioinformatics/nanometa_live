@@ -302,12 +302,39 @@ class TestStepNavigation:
 
     def test_proxy_prep_start_bumps_header(self, app_backend):
         fn = _fn(app_backend[0], "start-stop-button.n_clicks", input_contains="preparation-start-analysis-btn")
-        assert fn(1, 5) == 6
+        assert fn(1, 5, False, {"running": False}) == 6
 
     def test_proxy_no_click_prevents(self, app_backend):
         fn = _fn(app_backend[0], "start-stop-button.n_clicks", input_contains="preparation-start-analysis-btn")
         with pytest.raises(PreventUpdate):
-            fn(0, 5)
+            fn(0, 5, False, {"running": False})
+
+    def test_proxy_refuses_when_header_start_is_disabled(self, app_backend):
+        """Visualization-only mode and failed readiness disable the header
+        Start; the Preparation button must not get around that by bumping
+        the disabled button's n_clicks."""
+        fn = _fn(app_backend[0], "start-stop-button.n_clicks", input_contains="preparation-start-analysis-btn")
+        with pytest.raises(PreventUpdate):
+            fn(1, 5, True, {"running": False})
+
+    def test_proxy_refuses_while_a_run_is_active(self, app_backend):
+        """During a run the header button is Stop: a click labelled Start
+        must not open the stop prompt."""
+        fn = _fn(app_backend[0], "start-stop-button.n_clicks", input_contains="preparation-start-analysis-btn")
+        with pytest.raises(PreventUpdate):
+            fn(1, 5, False, {"running": True})
+
+    @pytest.mark.parametrize("header_disabled,status,expected", [
+        (True, {"running": False}, True),
+        (False, {"running": True}, True),
+        (False, {"running": False}, False),
+        (False, None, False),
+    ])
+    def test_prep_start_mirrors_header_availability(
+            self, app_backend, header_disabled, status, expected):
+        fn = _fn(app_backend[0], "preparation-start-analysis-btn.disabled")
+        disabled, _title = fn(header_disabled, status)
+        assert disabled is expected
 
 
 # --------------------------------------------------------------------------

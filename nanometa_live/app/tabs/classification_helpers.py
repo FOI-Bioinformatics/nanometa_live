@@ -245,6 +245,23 @@ def _sankey_info_figure(text):
     return fig
 
 
+def _total_read_count(kraken_df) -> int:
+    """All reads in the report, classified plus unclassified.
+
+    The base of Kraken2's own ``%`` column. Read from the ``root`` and
+    ``unclassified`` cumulative counts; when neither row exists, the sum of
+    direct reads (each read is assigned directly to exactly one node).
+    Summing cumulative reads over every row is NOT a total: it counts each
+    read once per rank.
+    """
+    if "cumul_reads" in kraken_df.columns:
+        names = kraken_df["name"].astype(str).str.strip()
+        total = int(kraken_df.loc[names.isin(["root", "unclassified"]), "cumul_reads"].sum())
+        if total > 0:
+            return total
+    return int(kraken_df["reads"].sum()) if "reads" in kraken_df.columns else 0
+
+
 def _build_sankey_frames(kraken_df, domains, tax_levels):
     """Filter the kraken frame to the requested domains and tax levels.
 
@@ -253,7 +270,7 @@ def _build_sankey_frames(kraken_df, domains, tax_levels):
     gains ``recalc_cumul`` (cumulative reads) and ``recalc_pct`` columns.
     """
     recalc_cumul = recalculate_cumulative_reads(kraken_df)
-    total_reads = sum(recalc_cumul.values()) or 1
+    total_reads = _total_read_count(kraken_df) or 1
 
     # taxid-based parent lookup. parent_taxid is derived from indentation
     # during Kraken2 parsing, so it survives aggregation reordering.
@@ -862,8 +879,8 @@ def _build_sunburst_nodes(filtered_df, tax_levels, total_reads, palette,
     first_level_reads = filtered_df[filtered_df["rank"] == first_level]["recalc_cumul"].sum()
     logging.debug(f"Sunburst: First level '{first_level}' has {level_counts.get(first_level, 0)} items with total reads {first_level_reads}")
 
-    # Root carries no value: branchvalues="remainder" avoids the
-    # parent >= sum(children) constraint.
+    # Root's value is filled in by _make_values_consistent once its children
+    # are known (branchvalues="total" needs parent >= sum(children)).
     ids.append("root")
     labels.append("All Taxa")
     parents.append("")
@@ -912,7 +929,33 @@ def _build_sunburst_nodes(filtered_df, tax_levels, total_reads, palette,
             colors.append(color)
             custom_data.append([RANK_NAMES.get(level, level), reads, pct_of_total])
 
+    values = _make_values_consistent(ids, parents, values)
     return ids, labels, parents, values, colors, custom_data
+
+
+def _make_values_consistent(ids, parents, values):
+    """Raise each parent's value to at least the sum of its children's.
+
+    Node values are cumulative (clade) reads, which already satisfy
+    parent >= sum(children) for one report and for a per-taxid aggregate. The
+    synthetic root carries 0 and needs its children's sum, and a composite-key
+    collision (two taxa sharing rank and name) can break the invariant for a
+    single node; under branchvalues="total" plotly silently omits such a
+    sector and its subtree. Children are appended after their parent, so a
+    reverse pass settles every level. The hover keeps the true read count
+    (customdata), so this changes sector geometry only where the data was
+    inconsistent.
+    """
+    index = {node_id: i for i, node_id in enumerate(ids)}
+    values = list(values)
+    child_sum = [0] * len(values)
+    for i in range(len(ids) - 1, -1, -1):
+        if child_sum[i] > values[i]:
+            values[i] = child_sum[i]
+        parent_idx = index.get(parents[i])
+        if parent_idx is not None:
+            child_sum[parent_idx] += values[i]
+    return values
 
 
 def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config,
@@ -1027,15 +1070,17 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config,
     logging.debug(f"Sunburst: Built {len(ids)} nodes, {len(set(parents))} unique parents")
 
     # Create the sunburst figure using go.Sunburst for full control
-    # CRITICAL FIX: Use branchvalues="remainder" instead of "total"
-    # "remainder" mode allows child values to sum to less than parent (or parent=0)
-    # This is more forgiving when hierarchy doesn't have perfect parent-child value relationships
+    # Values are cumulative (clade) reads, so a parent already contains its
+    # children: branchvalues="total". Under "remainder" plotly adds a parent's
+    # value on top of its children's, counting each read once per level --
+    # deeper branches outweighed shallower ones and "Of parent group" was
+    # wrong. _make_values_consistent guarantees parent >= sum(children).
     fig = go.Figure(go.Sunburst(
         ids=ids,
         labels=labels,
         parents=parents,
         values=values,
-        branchvalues="remainder",
+        branchvalues="total",
         marker=dict(
             colors=colors,
             line=dict(color="white", width=2)

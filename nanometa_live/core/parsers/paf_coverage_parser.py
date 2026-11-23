@@ -277,8 +277,14 @@ def paf_breadth(paf_path, min_mapq: int = 0) -> Optional["PafBreadth"]:
                   if k[0] == key[0] and k[3] == min_mapq and k != key]:
         _breadth_cache.pop(stale, None)
 
-    intervals: List[tuple] = []
-    ref_len = 0
+    # PAF coordinates are per target sequence. A reference is often several
+    # records (chromosome + plasmids, or a draft in many contigs), so the
+    # intervals are merged per target and the genome length is the sum of the
+    # target lengths -- the same definition aggregate_contig_coverage uses for
+    # the plots. Targets with no alignment do not appear in the PAF and are
+    # absent from both.
+    intervals: Dict[str, List[tuple]] = {}
+    target_len: Dict[str, int] = {}
     aligned = 0
     try:
         with open(path) as fh:
@@ -293,25 +299,28 @@ def paf_breadth(paf_path, min_mapq: int = 0) -> Optional["PafBreadth"]:
                     continue
                 if mapq < min_mapq or tend <= tstart or tend > tlen:
                     continue
-                ref_len = max(ref_len, tlen)
-                intervals.append((tstart, tend))
+                tname = parts[5]
+                target_len[tname] = max(target_len.get(tname, 0), tlen)
+                intervals.setdefault(tname, []).append((tstart, tend))
                 aligned += tend - tstart
     except (OSError, UnicodeDecodeError):
         return None
     if not intervals:
         return None
 
-    intervals.sort()
     covered = 0
-    cur_start, cur_end = intervals[0]
-    for start, end in intervals[1:]:
-        if start > cur_end:
-            covered += cur_end - cur_start
-            cur_start, cur_end = start, end
-        elif end > cur_end:
-            cur_end = end
-    covered += cur_end - cur_start
+    for target_intervals in intervals.values():
+        target_intervals.sort()
+        cur_start, cur_end = target_intervals[0]
+        for start, end in target_intervals[1:]:
+            if start > cur_end:
+                covered += cur_end - cur_start
+                cur_start, cur_end = start, end
+            elif end > cur_end:
+                cur_end = end
+        covered += cur_end - cur_start
 
-    result = PafBreadth(ref_length=ref_len, covered_bp=covered, aligned_bp=aligned)
+    result = PafBreadth(ref_length=sum(target_len.values()), covered_bp=covered,
+                        aligned_bp=aligned)
     _breadth_cache[key] = result
     return result
