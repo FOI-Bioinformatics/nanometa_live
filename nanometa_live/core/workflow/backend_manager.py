@@ -1037,11 +1037,14 @@ class BackendManager:
             if self.config:
                 self._update_file_counts()
 
-            # Surface remaining seconds until the realtime timeout fires
-            # so the dashboard verdict banner can render an "Auto-stop
-            # in Nm Ss" countdown (U3, 2026-05-09 UX spec). The monitor
+            # Surface when the realtime timeout fires so the dashboard
+            # verdict banner can render an "Auto-stop in Nm Ss" countdown
+            # (U3, 2026-05-09 UX spec). Published as a DEADLINE, which moves
+            # only when a new input file resets the timer: a remaining-seconds
+            # value changed the backend-status Store on every tick and
+            # re-fired every callback that takes it as an Input. The monitor
             # thread already enforces the timeout; this is read-only.
-            self.status["auto_stop_remaining_s"] = self._compute_auto_stop_remaining()
+            self.status["auto_stop_deadline"] = self._compute_auto_stop_deadline()
 
             # Expose a top-level boolean `completed` derived from pipeline_status.
             # Consumers (verdict banner run-state badge, header indicator, load
@@ -1061,7 +1064,14 @@ class BackendManager:
             return dict(self.status)
 
     def _compute_auto_stop_remaining(self) -> Optional[int]:
-        """Return seconds until the realtime timeout fires, or None.
+        """Return seconds until the realtime timeout fires, or None."""
+        deadline = self._compute_auto_stop_deadline()
+        if deadline is None:
+            return None
+        return max(0, int(deadline - time.time()))
+
+    def _compute_auto_stop_deadline(self) -> Optional[int]:
+        """Return the epoch second at which the realtime timeout fires, or None.
 
         ``None`` covers the cases where (a) the pipeline is not running,
         (b) no realtime_timeout_minutes is configured, or (c) the saved
@@ -1092,7 +1102,6 @@ class BackendManager:
         newest = getattr(self, "_newest_input_mtime", None)
         if newest and newest > anchor:
             anchor = newest
-        elapsed = time.time() - anchor
         # The pipeline's timer fires at timeout PLUS its grace period
         # (nanometanf realtime_processing_grace_period, default 5). The chip
         # used to count only the timeout and vanished five minutes before
@@ -1101,8 +1110,7 @@ class BackendManager:
             grace = int(self.config.get("realtime_processing_grace_period", 5) or 0)
         except (TypeError, ValueError):
             grace = 5
-        remaining = int((int(timeout_minutes) + grace) * 60 - elapsed)
-        return max(0, remaining)
+        return int(anchor + (int(timeout_minutes) + grace) * 60)
 
     # TTL for the cached file count below. Each interval tick on the
     # dashboard ends up calling _update_file_counts at least once; on a
@@ -1459,6 +1467,7 @@ class BackendManager:
         self.status["last_update"] = time.time()
         self.status.pop("stop_reason", None)
         self.status.pop("ended_at", None)
+        self.status.pop("unprocessed_input_files", None)
         self._stop_intent = None
         # A new run starts with a clean error record. The previous run's
         # errors were only ever cleared by an operator Stop, so a run that
@@ -1547,6 +1556,22 @@ class BackendManager:
                 meta["input_files_at_end"] = int(self.status.get("files_waiting") or 0)
             except Exception:
                 pass
+            # Exact count from the pipeline's processed-inputs ledger; the
+            # inbox-minus-processed figure above also counts files the age
+            # filter skipped and files an earlier run classified.
+            try:
+                from nanometa_live.core.export.run_status import (
+                    count_unprocessed_inputs,
+                )
+                unprocessed = count_unprocessed_inputs(
+                    outdir, (self.config or {}).get("nanopore_output_directory", ""),
+                    self.status.get("start_time"),
+                    (self.config or {}).get("max_file_age_minutes"))
+                if unprocessed is not None:
+                    meta["unprocessed_input_files"] = unprocessed
+                    self.status["unprocessed_input_files"] = unprocessed
+            except Exception:
+                logging.debug("unprocessed-input count failed", exc_info=True)
             from nanometa_live.core.utils.atomic_write import atomic_write_json
             atomic_write_json(path, meta)
         except Exception:

@@ -8,6 +8,7 @@ information for first responders and laboratory personnel.
 
 import os
 import glob
+import time
 import pandas as pd
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
@@ -19,6 +20,7 @@ import dash_bootstrap_components as dbc
 
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.app.tabs.dashboard_helpers import _fingerprint_marks_dir_seen
+from nanometa_live.app.utils.countdown import remaining_from_deadline
 from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
     load_nanoplot_stats,
@@ -303,9 +305,8 @@ def register_dashboard_callbacks(app: Dash):
         # U3: realtime-timeout countdown. Surfaced inside the verdict
         # banner's right column when the pipeline is running and the
         # operator configured a timeout. None = render nothing.
-        auto_stop_remaining_s = (
-            status.get("auto_stop_remaining_s") if status else None
-        )
+        auto_stop_remaining_s = remaining_from_deadline(
+            status.get("auto_stop_deadline") if status else None, time.time())
 
         # Check whether any validation results exist (used for confidence qualifier)
         validation_has_results = bool(

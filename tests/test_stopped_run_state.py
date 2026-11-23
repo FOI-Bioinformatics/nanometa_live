@@ -249,7 +249,9 @@ class TestUnprocessedInputIsNamed:
             {"processing_mode": "realtime"},
         )
         assert text == "Complete"
-        assert "14 input files" in detail and "not processed" in detail
+        # Without the pipeline's ledger the gap is stated without a cause
+        # (it also counts files the age filter skipped).
+        assert "14 more input files" in detail and "than this run processed" in detail
 
     def test_batch_mode_is_unchanged(self):
         _c, _t, detail = self._fn()(

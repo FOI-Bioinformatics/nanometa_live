@@ -873,6 +873,24 @@ class TestRunStateParity:
         assert "run stopped" not in content
         assert "interim snapshot" not in content
 
+    def test_recorded_unprocessed_count_is_stated_as_unclassified(
+            self, batch_output_dir, tmp_path):
+        self._write_meta(batch_output_dir, final_status="completed",
+                         files_processed=33, input_files_at_end=47,
+                         unprocessed_input_files=2)
+        content = self._content(batch_output_dir, tmp_path)
+        assert "2 input files in the watched folder were not classified" in content
+
+    def test_fallback_gap_claims_no_cause(self, batch_output_dir, tmp_path):
+        """Without the pipeline's ledger the gap also counts files the age
+        filter skipped, so it is stated as a difference, not as "never
+        processed"."""
+        self._write_meta(batch_output_dir, final_status="completed",
+                         files_processed=33, input_files_at_end=47)
+        content = self._content(batch_output_dir, tmp_path)
+        assert "never processed" not in content
+        assert "14 more input files than were processed" in content
+
     def test_lost_input_markers_name_the_files(self, batch_output_dir, tmp_path):
         """H20, pipeline side: the afterScript markers name the lost inputs."""
         self._write_meta(batch_output_dir, final_status="completed")

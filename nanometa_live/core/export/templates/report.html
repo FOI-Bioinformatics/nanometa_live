@@ -251,8 +251,15 @@
   {% else %}
     {% set run_clause = "" %}
   {% endif %}
-  {% if data.unprocessed_input_files %}
-    {% set run_clause = run_clause ~ " (" ~ data.unprocessed_input_files ~ " input file" ~ ("s" if data.unprocessed_input_files != 1 else "") ~ " in the watched folder " ~ ("were" if data.unprocessed_input_files != 1 else "was") ~ " never processed)" %}
+  {#
+    Exact when the backend counted the pipeline's processed-inputs ledger;
+    otherwise the inbox minus files processed, which also counts files the
+    age filter skipped or an earlier run classified, so it claims no cause.
+  #}
+  {% if data.unprocessed_input_files and data.unprocessed_input_exact %}
+    {% set run_clause = run_clause ~ " (" ~ data.unprocessed_input_files ~ " input file" ~ ("s" if data.unprocessed_input_files != 1 else "") ~ " in the watched folder " ~ ("were" if data.unprocessed_input_files != 1 else "was") ~ " not classified by this run)" %}
+  {% elif data.unprocessed_input_files %}
+    {% set run_clause = run_clause ~ " (the watched folder held " ~ data.unprocessed_input_files ~ " more input file" ~ ("s" if data.unprocessed_input_files != 1 else "") ~ " than were processed)" %}
   {% endif %}
   {#
     Tasks lost to error isolation (round-4 audit, H20). A corrupt input

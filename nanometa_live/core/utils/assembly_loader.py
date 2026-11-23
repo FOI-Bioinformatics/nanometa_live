@@ -29,7 +29,8 @@ def _read_json(path: Path) -> Optional[dict]:
 def load_assembly_stats(results_dir: Optional[str]) -> List[Dict[str, Any]]:
     """Return per-sample assembly stats, or [] when no assembly was produced.
 
-    Each entry: ``{sample, summary, contigs}`` where ``summary`` and ``contigs``
+    Each entry: ``{sample, taxid, summary, contigs}`` (``taxid`` None for a
+    metagenome assembly) where ``summary`` and ``contigs``
     default to ``{}`` / ``[]`` so callers can render whatever is present.
     """
     if not results_dir:
@@ -44,9 +45,15 @@ def load_assembly_stats(results_dir: Optional[str]) -> List[Dict[str, Any]]:
         data = _read_json(f)
         if not data:
             continue
-        sample = data.get("sample_id") or f.name.replace(".assembly_stats.json", "")
+        stem = f.name.replace(".assembly_stats.json", "")
+        sample = data.get("sample_id") or stem.split(".taxid")[0]
+        # <sample>.taxid<N> is a targeted assembly; with assembly_scope=both
+        # it sits beside the sample's metagenome assembly under the same
+        # sample_id, so the taxid is what tells the two apart.
+        taxid = stem.split(".taxid", 1)[1] if ".taxid" in stem else None
         out.append({
             "sample": sample,
+            "taxid": taxid,
             "summary": data.get("summary", {}) or {},
             "contigs": data.get("contigs", []) or [],
         })

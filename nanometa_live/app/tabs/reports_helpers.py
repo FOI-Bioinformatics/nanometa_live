@@ -268,6 +268,80 @@ def _assembly_absent_panel(enabled: Optional[bool],
                   className="border"))
 
 
+def _assembly_block(a: Dict[str, Any]) -> Any:
+    """One assembly: KPI row, depth caveat and its longest contigs."""
+    s = a.get("summary", {})
+    coverage = _assembly_coverage(a)
+    kpis = dbc.Row([
+        _kpi_tile(_fmt(s.get("total_contigs"), nd=0), "Contigs", "bi-diagram-2"),
+        _kpi_tile(_fmt(s.get("total_length"), nd=0), "Total bp", "bi-rulers"),
+        _kpi_tile(_fmt(s.get("largest_contig"), nd=0), "Largest bp", "bi-arrows-expand"),
+        _kpi_tile(_fmt(s.get("n50"), nd=0), "N50", "bi-bullseye"),
+        _kpi_tile(_fmt(s.get("circular_contigs"), nd=0), "Circular", "bi-arrow-repeat"),
+        _kpi_tile(f"{coverage:.0f}x" if coverage is not None else "--",
+                  "Median depth", "bi-layers"),
+    ], className="g-2 mb-2")
+    # Top contigs by length.
+    contigs = sorted(a.get("contigs", []), key=lambda c: c.get("length", 0), reverse=True)[:10]
+    rows = [
+        html.Tr([
+            html.Td(c.get("name", "")),
+            html.Td(f"{c.get('length', 0):,}"),
+            html.Td(f"{c.get('coverage', 0):.1f}x" if c.get("coverage") else "--"),
+            html.Td("yes" if c.get("is_circular") else "no"),
+        ]) for c in contigs
+    ]
+    table = (
+        dbc.Table([
+            html.Thead(html.Tr([html.Th("Contig"), html.Th("Length"),
+                                html.Th("Depth"), html.Th("Circular")])),
+            html.Tbody(rows),
+        ], size="sm", striped=True, className="mb-0")
+        if rows else html.Small("No contig detail.", className="text-muted")
+    )
+    # An assembly built at low coverage is a set of fragments, not a
+    # genome, and the contig count and N50 read as though it were one.
+    depth_note = None
+    if coverage is not None and coverage < LOW_COVERAGE_ASSEMBLY:
+        depth_note = dbc.Alert(
+            f"Median contig depth {coverage:.0f}x. A usable draft of a "
+            f"bacterial genome needs roughly "
+            f"{USABLE_ASSEMBLY_DEPTH:.0f}x, so these contigs are "
+            "fragments rather than a genome.",
+            color="warning", className="py-2 px-3 small mb-2")
+    return html.Div([
+        html.Strong(_decision_target(a) if a.get("taxid") else a.get("sample", ""),
+                    className="d-block mb-2"),
+        kpis,
+    ] + ([depth_note] if depth_note else []) + [table], className="mb-3")
+
+
+def _assembly_outcome_blocks(decisions, failed_samples) -> List[Any]:
+    """Declined targets and failed tasks, shown beside produced assemblies."""
+    blocks: List[Any] = []
+    # Targets the pipeline measured and declined belong in the same panel:
+    # rendered only when nothing assembled, one assembly hid all of them.
+    declined = [d for d in (decisions or []) if d.get("decision") == "declined"]
+    if declined:
+        blocks.append(html.Div([
+            html.Hr(className="my-3"),
+            dbc.Badge(f"Declined: not enough sequence ({len(declined)})",
+                      color="warning", className="mb-2"),
+        ] + _declined_rows(declined)))
+    failed = [str(x) for x in (failed_samples or [])]
+    if failed:
+        more = f" +{len(failed) - 3} more" if len(failed) > 3 else ""
+        blocks.append(html.Div([
+            dbc.Badge("Assembly failed", color="danger", className="me-2"),
+            html.Span(
+                f"{len(failed)} assembly task{'s' if len(failed) != 1 else ''} "
+                f"({', '.join(failed[:3])}{more}) produced no assembly. See "
+                "the run log.", className="small"),
+        ], className="mt-2"))
+
+    return blocks
+
+
 def build_assembly_panel(assemblies: List[Dict[str, Any]],
                          enabled: Optional[bool] = None,
                          failed_samples: Optional[List[str]] = None,
@@ -286,51 +360,8 @@ def build_assembly_panel(assemblies: List[Dict[str, Any]],
     """
     if not assemblies:
         return _assembly_absent_panel(enabled, failed_samples, decisions)
-    blocks = []
-    for a in assemblies:
-        s = a.get("summary", {})
-        coverage = _assembly_coverage(a)
-        kpis = dbc.Row([
-            _kpi_tile(_fmt(s.get("total_contigs"), nd=0), "Contigs", "bi-diagram-2"),
-            _kpi_tile(_fmt(s.get("total_length"), nd=0), "Total bp", "bi-rulers"),
-            _kpi_tile(_fmt(s.get("largest_contig"), nd=0), "Largest bp", "bi-arrows-expand"),
-            _kpi_tile(_fmt(s.get("n50"), nd=0), "N50", "bi-bullseye"),
-            _kpi_tile(_fmt(s.get("circular_contigs"), nd=0), "Circular", "bi-arrow-repeat"),
-            _kpi_tile(f"{coverage:.0f}x" if coverage is not None else "--",
-                      "Median depth", "bi-layers"),
-        ], className="g-2 mb-2")
-        # Top contigs by length.
-        contigs = sorted(a.get("contigs", []), key=lambda c: c.get("length", 0), reverse=True)[:10]
-        rows = [
-            html.Tr([
-                html.Td(c.get("name", "")),
-                html.Td(f"{c.get('length', 0):,}"),
-                html.Td(f"{c.get('coverage', 0):.1f}x" if c.get("coverage") else "--"),
-                html.Td("yes" if c.get("is_circular") else "no"),
-            ]) for c in contigs
-        ]
-        table = (
-            dbc.Table([
-                html.Thead(html.Tr([html.Th("Contig"), html.Th("Length"),
-                                    html.Th("Depth"), html.Th("Circular")])),
-                html.Tbody(rows),
-            ], size="sm", striped=True, className="mb-0")
-            if rows else html.Small("No contig detail.", className="text-muted")
-        )
-        # An assembly built at low coverage is a set of fragments, not a
-        # genome, and the contig count and N50 read as though it were one.
-        depth_note = None
-        if coverage is not None and coverage < LOW_COVERAGE_ASSEMBLY:
-            depth_note = dbc.Alert(
-                f"Median contig depth {coverage:.0f}x. A usable draft of a "
-                f"bacterial genome needs roughly "
-                f"{USABLE_ASSEMBLY_DEPTH:.0f}x, so these contigs are "
-                "fragments rather than a genome.",
-                color="warning", className="py-2 px-3 small mb-2")
-        blocks.append(html.Div([
-            html.Strong(a.get("sample", ""), className="d-block mb-2"),
-            kpis,
-        ] + ([depth_note] if depth_note else []) + [table], className="mb-3"))
+    blocks = [_assembly_block(a) for a in assemblies]
+    blocks.extend(_assembly_outcome_blocks(decisions, failed_samples))
 
     return dbc.Card([
         dbc.CardHeader([

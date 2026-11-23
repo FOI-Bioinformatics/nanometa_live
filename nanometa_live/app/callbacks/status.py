@@ -37,6 +37,19 @@ def _unprocessed_input_note(status: Dict[str, Any], config: Optional[Dict[str, A
     """
     if (config or {}).get("processing_mode") != "realtime":
         return ""
+    # Exact when the backend recorded it from the pipeline's processed-inputs
+    # ledger at the end of the run.
+    recorded = status.get("unprocessed_input_files")
+    if isinstance(recorded, (int, float)):
+        n = int(recorded)
+        if n <= 0:
+            return ""
+        return (f" -- {n} input file{'s' if n != 1 else ''} in the watched "
+                f"folder {'were' if n != 1 else 'was'} not classified by this run")
+    # Fallback (no ledger): the inbox minus files_processed. It also counts
+    # files the age filter skipped or an earlier run classified, so it states
+    # the difference and claims no cause -- "arrived after the run ended"
+    # was false for exactly those files.
     try:
         waiting = int(status.get("files_waiting") or 0)
         processed = int(status.get("files_processed") or 0)
@@ -45,9 +58,8 @@ def _unprocessed_input_note(status: Dict[str, Any], config: Optional[Dict[str, A
     gap = waiting - processed
     if gap <= 0:
         return ""
-    return (f" -- {gap} input file{'s' if gap != 1 else ''} in the watched "
-            f"folder {'were' if gap != 1 else 'was'} not processed "
-            f"(arrived after the run ended)")
+    return (f" -- the watched folder holds {gap} more input "
+            f"file{'s' if gap != 1 else ''} than this run processed")
 
 
 def _input_layout_note(status: Dict[str, Any]) -> str:
@@ -106,13 +118,43 @@ def _skipped_tasks_note(status: Dict[str, Any]) -> str:
     return note
 
 
+#: Fields that change on every poll without the run changing state.
+_VOLATILE_STATUS_KEYS = ("last_update",)
+
+
+def _status_signature(status: Dict[str, Any]) -> str:
+    """Comparable form of a backend status, without the volatile fields.
+
+    JSON with sorted keys, because the previous value arrives from the
+    browser (lists for tuples, string keys) and the new one from Python.
+    """
+    import json
+    trimmed = {k: v for k, v in (status or {}).items()
+               if k not in _VOLATILE_STATUS_KEYS}
+    return json.dumps(trimmed, sort_keys=True, default=str)
+
+
 def register_status(app, backend_manager):
     @app.callback(
-        Output("backend-status", "data"), Input("update-interval", "n_intervals")
+        Output("backend-status", "data"),
+        Input("update-interval", "n_intervals"),
+        State("backend-status", "data"),
     )
-    def update_backend_status(_):
-        """Update the backend status."""
-        return backend_manager.get_status()
+    def update_backend_status(_, previous):
+        """Update the backend status, only when it changed.
+
+        About 13 callbacks take backend-status as an Input, and Dash fires
+        them whenever the Store is written, equal value or not. The monitor
+        thread restamps ``last_update`` every 5 s, so a write per tick
+        re-fired all of them on a run where nothing happened. A tick whose
+        status differs from the stored one only in ``last_update`` writes
+        nothing. (The auto-stop countdown is published as a deadline for the
+        same reason.)
+        """
+        status = backend_manager.get_status()
+        if previous and _status_signature(previous) == _status_signature(status):
+            raise PreventUpdate
+        return status
 
     @app.callback(
         Output("results-dir-path", "data"),

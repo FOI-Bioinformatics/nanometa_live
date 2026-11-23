@@ -40,6 +40,19 @@ def test_sample_glob_does_not_overmatch_longer_prefix(tmp_path):
     assert not any("barcode10" in g for g in got), f"barcode10 leaked into barcode1: {got}"
 
 
+@pytest.mark.parametrize("ext", ["fastp.json", "tsv"])
+def test_sample_glob_does_not_take_a_sibling_sample_after_the_underscore(tmp_path, ext):
+    """The '_' boundary is not enough: 'NTC' matched 'NTC_2.<ext>' and
+    'sample_A' matched 'sample_A_rep1.<ext>', and their reads were summed
+    into the shorter-named sample (single_sample / per_file naming). Only
+    the batch and chunk companions the pipeline writes belong to it."""
+    from nanometa_live.core.utils.qc_loaders import _find_sample_files
+    for name in ["NTC", "NTC_2", "NTC_batch3", "NTC_chunk1", "NTC_rep1"]:
+        (tmp_path / f"{name}.{ext}").write_text("{}")
+    got = sorted(os.path.basename(f) for f in _find_sample_files(str(tmp_path), "NTC", [ext]))
+    assert got == sorted([f"NTC.{ext}", f"NTC_batch3.{ext}", f"NTC_chunk1.{ext}"])
+
+
 # --------------------------------------------------------------------------- #
 # per_file name sanitisation must keep distinct files as distinct samples.
 # --------------------------------------------------------------------------- #

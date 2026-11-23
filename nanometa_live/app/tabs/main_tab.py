@@ -64,6 +64,7 @@ from nanometa_live.app.tabs.main_tab_helpers import (  # noqa: E402
     render_validation_results_card,
     validation_store_entry,
     not_detected_caveat,
+    count_organisms_found,
 )
 from nanometa_live.app.tabs.dashboard_helpers import (  # noqa: E402
     DEFAULT_LOW_READ_FLOOR,
@@ -453,11 +454,9 @@ def register_main_callbacks(app: Dash):
             # which is consistent with the abundance percentage shown on each card.
             filtered_df = filtered_df.sort_values('cumul_reads', ascending=False).head(top_count)
 
-            # Count unique organisms at species/genus level
-            species_df = kraken_df[kraken_df['rank'].isin(['S', 'G'])]
-            species_df = species_df[species_df['taxid'] > 1]
-            species_df = species_df[species_df['reads'] > 0]
-            total_organisms = len(species_df)
+            # Species with reads plus genus-only identifications, on
+            # cumulative reads (see count_organisms_found).
+            total_organisms = count_organisms_found(kraken_df)
 
             # Find most abundant organism
             most_abundant = None

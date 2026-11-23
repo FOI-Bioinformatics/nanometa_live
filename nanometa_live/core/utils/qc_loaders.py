@@ -64,14 +64,21 @@ def _empty_fastp_stats() -> Dict[str, int]:
 def _find_sample_files(directory: str, sample: str, extensions: List[str]) -> List[str]:
     """Glob a sample's flat and batch-suffixed files for each extension.
 
-    For each extension, matches ``<sample>.<ext>`` followed by
-    ``<sample>_*.<ext>`` (the batch-numbered companions written in
-    real-time mode), preserving that order.
+    For each extension, matches ``<sample>.<ext>`` followed by the
+    companions the pipeline writes, ``<sample>_batch<N>.<ext>`` and
+    ``<sample>_chunk<N>.<ext>``, preserving that order. A bare
+    ``<sample>_*`` also took a sibling sample ("NTC" matched "NTC_2",
+    "sample_A" matched "sample_A_rep1") and summed its reads in.
     """
+    companion = re.compile(
+        r"^" + re.escape(sample) + r"_(?:batch|chunk)\d+\.")
     files: List[str] = []
     for ext in extensions:
         files.extend(glob.glob(os.path.join(directory, f"{sample}.{ext}")))
-        files.extend(glob.glob(os.path.join(directory, f"{sample}_*.{ext}")))
+        files.extend(
+            f for f in sorted(glob.glob(os.path.join(directory, f"{sample}_*.{ext}")))
+            if companion.match(os.path.basename(f))
+        )
     return files
 
 

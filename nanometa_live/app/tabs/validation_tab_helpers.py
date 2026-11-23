@@ -468,6 +468,7 @@ def _compute_summary(results):
             "partial": int,
             "low_confidence": int,
             "no_data": int,
+            "failed": int,
             "reads_validated": int,
             "reads_total": int,
         }``
@@ -477,6 +478,7 @@ def _compute_summary(results):
         "partial": 0,
         "low_confidence": 0,
         "no_data": 0,
+        "failed": 0,
         "reads_validated": 0,
         "reads_total": 0,
     }
@@ -488,6 +490,10 @@ def _compute_summary(results):
             counts["partial"] += 1
         elif status in ("low", "uncertain", "rejected"):
             counts["low_confidence"] += 1
+        elif status == "failed":
+            # The validation process failed (tool crash, unreadable output):
+            # not the same as "not checked", which is what No Data says.
+            counts["failed"] += 1
         else:
             counts["no_data"] += 1
         try:

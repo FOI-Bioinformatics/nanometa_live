@@ -111,6 +111,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   tick, 86-98 ms at 96 barcodes x 300 batches), and input-file counting
   re-lists only directories whose mtime changed (113 ms per refresh at 96 x
   500 files, inside the status lock).
+- "Organisms Found" counts species with reads (subspecies included) plus
+  genera whose reads resolve no further than the genus. It counted species
+  and genus rows with direct reads, which missed a species whose reads sit
+  in its subspecies and counted a genus beside its own species.
+- A sample's QC files are its own and its batch/chunk companions only.
+  "NTC" also matched "NTC_2" and "sample_A" matched "sample_A_rep1", and
+  their reads were summed into the shorter-named sample.
+- The Reports assembly panel lists declined targets and failed assembly
+  tasks beside the assemblies that were produced; one assembly used to hide
+  them all. A targeted assembly is headed with its taxid, so it is told
+  apart from the same sample's metagenome assembly.
+- A validation whose process failed is counted and named as failed, not as
+  No Data ("not checked").
+- The count of input files a real-time run did not classify comes from
+  nanometanf's processed-inputs ledger, recorded when the run ends. The
+  inbox-minus-processed figure counted files the age filter skipped and
+  files an earlier run classified, and said they "arrived after the run
+  ended"; without a ledger the header and report now state only the
+  difference.
+- backend-status changes only when the status does. The auto-stop
+  countdown is published as a deadline and the store write is skipped when
+  only the monitor's timestamp moved; each tick of a run used to re-fire
+  the ~13 callbacks that take it as an Input.
 
 ### Changed
 
