@@ -177,7 +177,10 @@ class TestStatusCacheCarriesRunStateForAlerts:
         assert cache["running"] is False
         assert cache["completed"] is True
         assert cache["processed_files"] == 12
-        assert cache["pending_files"] == 3
+        # files_waiting is the whole input folder, processed files included;
+        # pending is what has not been processed (3 in the folder, 12
+        # processed -> nothing pending).
+        assert cache["pending_files"] == 0
         assert cache["error_count"] == 2
         assert "active_alerts" not in cache, "dead key, computed by nothing"
 
@@ -219,6 +222,25 @@ class TestStatusCacheCarriesRunStateForAlerts:
                 cache["_samples_data"],
             )
         assert not [a for a in alerts if a.get("category") == "completion"]
+
+
+def test_pending_files_are_the_unprocessed_part_of_the_input_folder():
+    """files_waiting counts every read file in the watched folder, processed
+    or not. Passed straight through as pending_files, a real-time run with
+    a 400-file folder of which 390 were classified raised "High number of
+    pending files: 400" (threshold 50) while 10 were waiting."""
+    from nanometa_live.app.tabs.dashboard_helpers import run_status_for_alerts
+    status = {"running": True, "files_waiting": 400, "files_processed": 390}
+    assert run_status_for_alerts(status)["pending_files"] == 10
+
+
+def test_pending_files_alert_does_not_fire_on_a_mostly_processed_folder():
+    from nanometa_live.app.tabs.dashboard_helpers import run_status_for_alerts
+    from nanometa_live.core.utils.alert_engine import get_alert_engine
+    run = run_status_for_alerts(
+        {"running": True, "files_waiting": 400, "files_processed": 390})
+    alerts = get_alert_engine()._check_data_processing(run, [])
+    assert not any("pending files" in a.message for a in alerts)
 
 
 def test_run_status_for_alerts_tolerates_a_missing_status():

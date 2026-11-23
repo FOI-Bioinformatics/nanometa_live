@@ -1407,17 +1407,24 @@ def run_status_for_alerts(backend_status: Optional[Dict[str, Any]]) -> Dict[str,
 
     Translates the BackendManager status names (``files_processed``,
     ``files_waiting``, the ``errors`` list) to the alert engine's
-    (``processed_files``, ``pending_files``, ``error_count``) and carries
+    (``processed_files``, ``pending_files`` = waiting minus processed,
+    ``error_count``) and carries
     ``running`` / ``completed`` through. Every value is a plain bool or int,
     so the result can ride the ``dashboard-overall-status-cache`` Store.
     """
     status = backend_status or {}
+    waiting = int(status.get("files_waiting") or 0)
+    processed = int(status.get("files_processed") or 0)
     return {
         "running": bool(status.get("running", False)),
         "completed": bool(status.get("completed", False)),
         "error_count": len(status.get("errors") or []),
-        "pending_files": int(status.get("files_waiting") or 0),
-        "processed_files": int(status.get("files_processed") or 0),
+        # files_waiting counts every read file in the watched folder,
+        # processed or not; passed through as pending, a mostly classified
+        # 400-file real-time folder raised "High number of pending files:
+        # 400" (threshold 50). Pending is the part not yet processed.
+        "pending_files": max(0, waiting - processed),
+        "processed_files": processed,
     }
 
 

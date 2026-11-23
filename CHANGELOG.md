@@ -518,6 +518,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   now carried across ticks.
 - The Dashboard alerts panel no longer raises CRITICAL "0.0% of sequences
   classified" before any data exists: an unmeasured rate was read as 0.0.
+- The "High number of pending files" alert counts files not yet processed.
+  The engine was given every read file in the watched folder, processed
+  ones included, so a mostly classified real-time folder of 400 files
+  raised it with 10 waiting.
 - The ACTION REQUIRED count matches the organisms named under it. It
   included moderate-tier hits, which are now stated separately ("plus N
   moderate-risk").
