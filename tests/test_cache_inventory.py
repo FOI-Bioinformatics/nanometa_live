@@ -28,6 +28,7 @@ WATCHED_MODULES = [
     "core/utils/classification_loaders.py",
     "core/utils/qc_loaders.py",
     "core/utils/seqkit_batch_cache.py",
+    "core/utils/chopper_counts.py",
     "core/utils/report_accumulation.py",
     "core/utils/sample_detector.py",
     "core/utils/read_length_probe.py",
@@ -56,6 +57,7 @@ COVERED_OR_EXEMPT = {
     "_frame_sizes", "_last_good_sizes",
     # round-3 modules with their own registered clear functions
     "_cache",            # seqkit_batch_cache
+    "_counts_cache",     # chopper_counts (clear_chopper_counts_cache, both paths)
     "_sample_accum",     # report_accumulation
     "_serving_since", "_last_warned",   # staleness
     "_breadth_cache",    # paf_coverage_parser (harness reset)

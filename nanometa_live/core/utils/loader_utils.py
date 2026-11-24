@@ -298,6 +298,10 @@ def clear_all_loader_caches():
 
     staleness.clear()
     clear_seqkit_batch_cache()
+    # Chopper's per-batch counts belong to the run that wrote them.
+    from nanometa_live.core.utils.chopper_counts import clear_chopper_counts_cache
+
+    clear_chopper_counts_cache()
     # The batch-progress memo is keyed on the chunk plan and the per-batch
     # report directories of the run that wrote them; a new run into the same
     # output directory replaces both. Imported here (app from core) because

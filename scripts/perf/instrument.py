@@ -203,6 +203,9 @@ def reset_caches() -> None:
     staleness.clear()
     sbc.clear_seqkit_batch_cache()
     racc.clear_sample_accum_cache()
+    from nanometa_live.core.utils.chopper_counts import clear_chopper_counts_cache
+
+    clear_chopper_counts_cache()
     with lu._parse_locks_lock:
         lu._parse_locks.clear()
 
