@@ -29,6 +29,7 @@ from nanometa_live.core.config.pathogen_loader import (
     PathogenEntry,
     ThreatLevel,
     clear_cache,
+    default_alert_threshold,
     export_watchlist_template as _export_template,
     get_pathogen_database,
     validate_watchlist_yaml,
@@ -183,6 +184,25 @@ def _database_taxids_are_ncbi() -> bool:
         return False
 
 
+def _database_generates_gtdb_variants() -> bool:
+    """Whether to index entries' speculative GTDB genus-suffix forms.
+
+    True for a GTDB or undetectable database, so a custom NCBI watchlist
+    name reaches a grafted GTDB report name on a mapping-less build; False
+    on an NCBI database where the suffixes are absent. No profile yet:
+    generate, matching the unknown-nomenclature default. Mirrors
+    WatchlistManager._database_generates_gtdb_variants.
+    """
+    try:
+        from nanometa_live.core.taxonomy.taxid_mapping import (
+            get_mapping_collection,
+        )
+        collection = get_mapping_collection()
+        return bool(collection and collection.profile.generates_gtdb_variants)
+    except (ImportError, AttributeError):
+        return True
+
+
 # (organisms digest, custom digest) -> detections. The alert engine calls
 # check_for_dangerous_pathogens with identical inputs on every tick; the
 # merged-db build is cached below, but the O(M x |db|) matching loop still
@@ -225,6 +245,54 @@ def check_for_dangerous_pathogens(
         while len(_dangerous_check_memo) > _DANGEROUS_CHECK_MEMO_KEYS:
             _dangerous_check_memo.pop(next(iter(_dangerous_check_memo)))
     return [dict(d) for d in cached]
+
+
+def _custom_name_resolver(
+    custom_watchlist: Optional[List[Dict[str, Any]]],
+    detected_organisms: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """Map each detected name to the custom entry it denotes, or nothing.
+
+    One pass with ``TaxonomyMatcher``'s entry index, so the cost is
+    O(rows + entries) rather than the product, and the rule is the one the
+    WatchlistManager pass applies: best match wins, first entry wins ties,
+    nothing below the 0.7 alert floor. Returns an empty map when there is no
+    custom watchlist, so the caller's exact-name lookup is unchanged.
+    """
+    if not custom_watchlist:
+        return {}
+    try:
+        from types import SimpleNamespace
+
+        from nanometa_live.core.watchlist.taxonomy_matcher import (
+            get_taxonomy_matcher,
+        )
+        matcher = get_taxonomy_matcher()
+        shims = [
+            SimpleNamespace(
+                name=item.get("name", "") or "",
+                names_alt=item.get("names_alt") or [],
+                _item=item,
+            )
+            for item in custom_watchlist
+            if item.get("name")
+        ]
+        if not shims:
+            return {}
+        index = matcher.build_entry_index(
+            shims, generates_gtdb_variants=_database_generates_gtdb_variants())
+        resolved: Dict[str, Dict[str, Any]] = {}
+        for organism in detected_organisms:
+            name = (organism.get("name") or "").lower().strip()
+            if not name or name in resolved:
+                continue
+            shim, score = matcher.match_row_indexed(name, index)
+            if shim is not None and score >= 0.7:
+                resolved[name] = shim._item
+        return resolved
+    except Exception as exc:  # matching must never break alerting
+        logger.debug("Custom watchlist name resolution failed: %s", exc)
+        return {}
 
 
 def _check_for_dangerous_pathogens_uncached(
@@ -277,6 +345,18 @@ def _check_for_dangerous_pathogens_uncached(
             if name:
                 custom_lookup[name] = item
 
+    # The name half of that lookup is an exact lowercase compare, so a
+    # detected name spelled differently from the watchlist entry -- a GTDB
+    # polyphyly suffix, an underscore spelling, a strain suffix -- found
+    # nothing. That was not merely a missed custom threshold: where the
+    # built-in database DID match the row by substring, the
+    # "watchlist exists but this pathogen is not in it" branch below SKIPPED
+    # the alert entirely, so a differently spelled name suppressed the
+    # detection (audit 2026-11-06, finding 33). The resolver below answers
+    # the same question through TaxonomyMatcher, the matcher the dashboard's
+    # own watchlist pass uses, at its 0.7 floor.
+    custom_by_name = _custom_name_resolver(custom_watchlist, detected_organisms)
+
     db_is_ncbi = _database_taxids_are_ncbi()
 
     for organism in detected_organisms:
@@ -312,6 +392,7 @@ def _check_for_dangerous_pathogens_uncached(
         custom_entry = (
             (custom_lookup.get(taxid) if db_is_ncbi else None)
             or custom_lookup.get(name)
+            or custom_by_name.get(name)
         )
 
         # If pathogen is in custom watchlist, respect its enabled status
@@ -347,8 +428,15 @@ def _check_for_dangerous_pathogens_uncached(
             # Only alert for enabled entries (default to enabled if not specified)
             if not custom_entry.get("enabled", True):
                 continue
-            alert_threshold = custom_entry.get("alert_threshold", 10)
-            if reads >= alert_threshold:
+            # A custom entry that states no threshold screens at its threat
+            # level's default, the same table every other path uses; a flat
+            # 10 here made an unstated critical entry half as sensitive as
+            # the dashboard's own watchlist pass (audit 2026-11-06, finding 33).
+            alert_threshold = custom_entry.get("alert_threshold")
+            if alert_threshold is None:
+                alert_threshold = default_alert_threshold(
+                    custom_entry.get("threat_level", "moderate"))
+            if reads >= int(alert_threshold):
                 alerts.append({
                     "taxid": custom_entry.get("taxid") or taxid,
                     "detected_taxid": taxid,

@@ -35,9 +35,16 @@ def bm(tmp_path):
     manager = BackendManager(str(tmp_path))
     manager.config = {"results_output_directory": str(out), "auto_report": False}
     manager.workflow_manager = MagicMock()
-    manager.workflow_manager.stop.return_value = (True, "stopped")
     manager.workflow_manager.status = {"errors": []}
-    manager.workflow_manager.get_status.return_value = {"running": False, "errors": []}
+    # A live pipeline: stop() first asks whether there is anything to stop
+    # (a run that already exited is classified, not relabelled), and the
+    # workflow manager reports not-running once it has been stopped.
+    manager.workflow_manager.get_status.return_value = {"running": True, "errors": []}
+
+    def _stop():
+        manager.workflow_manager.get_status.return_value = {"running": False, "errors": []}
+        return True, "stopped"
+    manager.workflow_manager.stop.side_effect = _stop
     manager._auto_generate_report = MagicMock(return_value=None)
     manager._release_lock = MagicMock()
     manager.status["running"] = True
@@ -249,7 +256,9 @@ class TestUnprocessedInputIsNamed:
             {"processing_mode": "realtime"},
         )
         assert text == "Complete"
-        assert "14 input files" in detail and "not processed" in detail
+        # Without the pipeline's ledger the gap is stated without a cause
+        # (it also counts files the age filter skipped).
+        assert "14 more input files" in detail and "than this run processed" in detail
 
     def test_batch_mode_is_unchanged(self):
         _c, _t, detail = self._fn()(

@@ -175,11 +175,13 @@ def _main_advanced_filters():
                         type="number",
                         min=0,
                         max=100,
-                        step=0.1,
+                        # "any": step=0.1 made 0.05 invalid in the browser,
+                        # which then sent None and the filter stayed at 0.1.
+                        step="any",
                         value=0.1,
                         placeholder="Minimum %"
                     ),
-                    dbc.FormText("Hide organisms below this abundance")
+                    dbc.FormText("Hide organisms below this abundance (%); 0 shows all")
                 ], md=3),
                 dbc.Col([
                     dbc.Label("Taxonomic Rank:", html_for="tax-rank-filter"),

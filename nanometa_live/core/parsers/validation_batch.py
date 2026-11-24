@@ -51,7 +51,13 @@ def collect_batch_results(
                 continue
             results.append(r)
 
-    # blast per-batch tabular: <sample>_taxid<tid>_<batch_id>.blast.tsv
+    # blast per-batch tabular: <sample>_taxid<tid>_<batch_id>.blast.tsv, with
+    # its <...>_<batch_id>.blast_stats.json sidecar carrying the read count
+    # the hits were measured against. Without the sidecar every batch result
+    # read "0 of 0, Low Confidence" (live test 2026-11-24).
+    from nanometa_live.core.parsers.blast_stats import (
+        apply_blast_stats, parse_blast_stats_json,
+    )
     blast = _batch_dir(results_dir, "blast")
     if blast.is_dir():
         for tsv in blast.glob(f"*{suffix}.blast.tsv"):
@@ -70,6 +76,16 @@ def collect_batch_results(
                 continue
             if taxid and file_taxid != taxid:
                 continue
-            results.append(parse_blast_tabular(tsv, file_sample, file_taxid))
+            result = parse_blast_tabular(tsv, file_sample, file_taxid)
+            stats = parse_blast_stats_json(tsv.with_name(f"{name}.blast_stats.json"))
+            if stats:
+                apply_blast_stats(result, stats)
+            results.append(result)
 
+    # Name results the batch files leave unnamed from any batch result for
+    # the same taxid that carries a name (the minimap2 stats do).
+    names = {r.taxid: r.species for r in results if getattr(r, "species", "")}
+    for r in results:
+        if not getattr(r, "species", "") and r.taxid in names:
+            r.species = names[r.taxid]
     return results

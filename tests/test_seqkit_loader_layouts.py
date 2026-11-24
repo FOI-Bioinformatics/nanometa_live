@@ -7,6 +7,9 @@ as a flat ``seqkit/<sample>.tsv`` layout. The older nested
 output is supported); a test pins that nested files are now ignored.
 """
 
+import os
+import time
+
 import pandas as pd
 import pytest
 
@@ -114,3 +117,43 @@ class TestIncrementalDoesNotDoubleCountMergedSamples:
         )
         assert counts.get("barcode02") == 100
         assert len(df[df["sample"] == "barcode01"]) == 1
+
+
+class TestIncrementalSkipIsNotCached:
+    """Audit 2026-11-06, finding 10: a batch TSV inside its stability window
+    is skipped by the per-file cache, and the per-sample total built without
+    it was stored in the mtime cache under a fingerprint that already
+    included the file. Once the window closed (no mtime changes) the cache
+    kept answering with the reduced total."""
+
+    HDR = ("file\tformat\ttype\tnum_seqs\tsum_len\tmin_len\tavg_len\tmax_len"
+           "\tQ1\tQ2\tQ3\tsum_gap\tN50\tN50_num\tQ20(%)\tQ30(%)\tAvgQual\tGC(%)\tsum_n\n")
+
+    def _batch(self, path, n, age_seconds):
+        path.write_text(
+            self.HDR
+            + f"x.fq\tFASTQ\tDNA\t{n}\t{n * 1000}\t500\t1000\t2000\t800\t1000\t1200"
+              f"\t0\t1000\t{n // 2}\t90\t80\t12\t45\t0\n"
+        )
+        t = time.time() - age_seconds
+        os.utime(path, (t, t))
+
+    def test_skipped_batch_is_summed_once_stable(self, tmp_path, monkeypatch):
+        from nanometa_live.core.utils import loader_utils
+        from nanometa_live.core.utils.qc_loaders import load_seqkit_stats
+        loader_utils.clear_all_loader_caches()
+        loader_utils._freshness_epoch = 0
+        batch_dir = tmp_path / "seqkit" / "barcode01" / "batch_stats"
+        batch_dir.mkdir(parents=True)
+        self._batch(batch_dir / "batch_0.tsv", 100, age_seconds=10)
+        self._batch(batch_dir / "batch_1.tsv", 100, age_seconds=0)
+
+        first = load_seqkit_stats(str(tmp_path), "barcode01")
+        assert int(first["num_seqs"].sum()) == 100, "precondition: young batch skipped"
+
+        real = time.time
+        monkeypatch.setattr(loader_utils.time, "time", lambda: real() + 5.0)
+        second = load_seqkit_stats(str(tmp_path), "barcode01")
+        assert int(second["num_seqs"].sum()) == 200, (
+            "the reduced total was served from the mtime cache after the window closed")
+        loader_utils.clear_all_loader_caches()

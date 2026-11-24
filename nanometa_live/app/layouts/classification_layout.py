@@ -51,15 +51,19 @@ def create_classification_layout() -> html.Div:
 
             # Color scheme selector
             dbc.Col([
-                html.Label("Color Scheme:", className="fw-bold mb-1", style={"fontSize": "0.9rem"}),
+                html.Label("Color by:", className="fw-bold mb-1", style={"fontSize": "0.9rem"}),
                 dbc.Select(
                     id='classification-color-scheme',
+                    # Lineage is the default: rank is already shown by the
+                    # column (Sankey) or ring (Sunburst), so colouring by rank
+                    # carried no information. The rank palettes remain.
                     options=[
-                        {'label': 'Viridis (Colorblind-safe)', 'value': 'viridis'},
-                        {'label': 'Tableau (Scientific)', 'value': 'tableau'},
-                        {'label': 'Dark (High contrast)', 'value': 'dark'},
+                        {'label': 'By lineage (colour-blind safe)', 'value': 'lineage'},
+                        {'label': 'By rank: Viridis', 'value': 'viridis'},
+                        {'label': 'By rank: Tableau', 'value': 'tableau'},
+                        {'label': 'By rank: Dark (high contrast)', 'value': 'dark'},
                     ],
-                    value='viridis',
+                    value='lineage',
                 ),
             ], md=3)
         ], className="mb-2", align="end"),

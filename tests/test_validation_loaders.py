@@ -149,9 +149,175 @@ class TestOnDiskBlastSupplementsAggregate:
         )
         assert out[632]["validated_reads"] == 7
 
+    def test_minimap2_only_aggregate_entry_does_not_hide_disk_blast(self, tmp_path):
+        """The same pair listed in the aggregate by minimap2 alone (no BLAST
+        fields) blocked the on-disk blast.tsv: the badge read "Not Verified"
+        for an organism BLAST confirmed (live test 2026-11-24). The disk
+        BLAST fills the BLAST fields; the minimap2 fields stay."""
+        _aggregate(tmp_path, {"barcode01": {"562": {
+            "kraken_reads": 10, "minimap2_mapped": 9, "minimap2_hit_rate": 0.9,
+            "minimap2_identity": 98.0, "avg_mapq": 55, "minimap2_status": "confirmed",
+        }}})
+        self._disk_blast(tmp_path, "barcode01", 562, reads=9)
+        out = load_blast_validation_data(str(tmp_path), WATCHLIST)
+        assert out[562]["validated_reads"] == 9
+        assert out[562]["status"] != "no_data"
+        assert out[562]["minimap2_status"] == "confirmed"
+
     def test_taxid_prefixed_filename_is_matched(self, tmp_path):
         # No aggregate at all: only the current-pipeline naming on disk.
         self._disk_blast(tmp_path, "barcode01", 562, reads=3)
         out = load_blast_validation_data(str(tmp_path), WATCHLIST)
         assert 562 in out
         assert out[562]["validated_reads"] == 3
+
+
+class TestBlastFallbackDenominatorIsTheClade:
+    """Audit 2026-11-06, finding 22: the on-disk BLAST fallback divided the
+    validated reads by the per-rank ``reads`` column while the pipeline
+    validates the clade (``KreportTree.cladeOf``). On the documented
+    *F. tularensis* report (3,406 direct / 9,602 clade) that is a 282% rate.
+    The denominator is now ``cumul_reads`` (falling back to ``reads``), the
+    rate is clamped to 100, and the cache entry follows the sample's Kraken2
+    reports so a report that advances is not served with the old rate."""
+
+    WATCHLIST = [{"taxid": 263, "name": "Francisella tularensis"}]
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self):
+        from nanometa_live.core.utils import loader_utils
+        loader_utils.clear_all_loader_caches()
+        loader_utils._freshness_epoch = 0
+        yield
+        loader_utils.clear_all_loader_caches()
+
+    @staticmethod
+    def _kraken(tmp_path, clade=9602, direct=3406, age=120):
+        import os
+        import time
+        kraken = tmp_path / "kraken2"
+        kraken.mkdir(exist_ok=True)
+        report = kraken / "barcode01.kraken2.report.txt"
+        report.write_text(
+            f"100.00\t{clade}\t0\tR\t1\troot\n"
+            f" 99.00\t{clade}\t{direct}\tS\t263\tFrancisella tularensis\n"
+            f" 60.00\t{clade - direct}\t{clade - direct}\tS1\t119857\t"
+            "  Francisella tularensis subsp. holarctica\n"
+        )
+        t = time.time() - age
+        os.utime(report, (t, t))
+
+    @staticmethod
+    def _blast(tmp_path, n_reads):
+        blast = tmp_path / "validation" / "blast"
+        blast.mkdir(parents=True, exist_ok=True)
+        (blast / "barcode01_taxid263.blast.tsv").write_text(
+            "".join(f"read{i}\tref\t98.0\n" for i in range(n_reads)))
+
+    def test_rate_uses_the_clade_count(self, tmp_path):
+        self._kraken(tmp_path)
+        self._blast(tmp_path, 6000)
+        out = load_blast_validation_data(str(tmp_path), self.WATCHLIST)
+        assert out[263]["total_reads"] == 9602
+        assert out[263]["validation_rate"] == pytest.approx(62.5, abs=0.1)
+        assert out[263]["status"] == "partial"
+
+    def test_rate_is_clamped_to_100(self, tmp_path):
+        self._kraken(tmp_path, clade=9602, direct=3406)
+        # More validated reads than the denominator can only come from a
+        # superset of it (an older report); never report more than fully.
+        self._blast(tmp_path, 9700)
+        out = load_blast_validation_data(str(tmp_path), self.WATCHLIST)
+        assert out[263]["validation_rate"] == 100.0
+
+    def test_falls_back_to_reads_without_cumul_column(self):
+        import pandas as pd
+        from nanometa_live.core.utils.validation_loaders import _clade_reads
+        assert _clade_reads(pd.Series({"reads": 7, "taxid": 1})) == 7
+        assert _clade_reads(pd.Series({"cumul_reads": float("nan"), "reads": 7})) == 7
+        assert _clade_reads(pd.Series({"cumul_reads": 12, "reads": 7})) == 12
+
+    def test_advanced_kraken_report_invalidates_the_cached_rate(self, tmp_path):
+        self._kraken(tmp_path, clade=9602, age=120)
+        self._blast(tmp_path, 6000)
+        first = load_blast_validation_data(str(tmp_path), self.WATCHLIST)
+        assert first[263]["total_reads"] == 9602
+        # The report advances; nothing under validation/ changes.
+        self._kraken(tmp_path, clade=19204, direct=6812, age=60)
+        second = load_blast_validation_data(str(tmp_path), self.WATCHLIST)
+        assert second[263]["total_reads"] == 19204, (
+            "the cache entry was keyed on validation/ alone and served the "
+            "old denominator after the Kraken2 report advanced"
+        )
+
+
+class TestFlextaxdDbTaxidMatch:
+    """On a flextaxd/GTDB database a grafted organism's db node taxid differs
+    from its NCBI taxid; nanometanf names the BLAST files and keys the kraken
+    report by the db taxid, while the watchlist carries the NCBI taxid and the
+    organism card looks the result up by the displayed db taxid. The loader
+    must match on the db taxid and surface the result under both ids (bug
+    audit 2026-11-08, finding 1)."""
+
+    # B. anthracis: NCBI 1392, grafted db node 4005020.
+    WATCHLIST = [{"taxid": 1392, "name": "Bacillus anthracis",
+                  "db_taxid": 4005020}]
+
+    @pytest.fixture(autouse=True)
+    def _clear(self):
+        from nanometa_live.core.utils import loader_utils
+        loader_utils.clear_all_loader_caches()
+        yield
+        loader_utils.clear_all_loader_caches()
+
+    @staticmethod
+    def _run(tmp_path, n_reads=90):
+        import os
+        import time
+        kraken = tmp_path / "kraken2"
+        kraken.mkdir(exist_ok=True)
+        report = kraken / "barcode01.kraken2.report.txt"
+        # The report row is keyed by the db taxid, under the GTDB name.
+        report.write_text(
+            "100.00\t100\t0\tR\t1\troot\n"
+            " 90.00\t100\t100\tS\t4005020\tBacillus_A anthracis\n"
+        )
+        t = time.time() - 120
+        os.utime(report, (t, t))
+        blast = tmp_path / "validation" / "blast"
+        blast.mkdir(parents=True, exist_ok=True)
+        (blast / "barcode01_taxid4005020.blast.tsv").write_text(
+            "".join(f"read{i}\tref\t98.0\n" for i in range(n_reads)))
+
+    def test_db_taxid_file_and_denominator_resolve(self, tmp_path):
+        self._run(tmp_path)
+        out = load_blast_validation_data(str(tmp_path), self.WATCHLIST)
+        # Found under the db taxid (what the organism card looks up by)...
+        assert 4005020 in out
+        assert out[4005020]["validated_reads"] == 90
+        assert out[4005020]["total_reads"] == 100
+        assert out[4005020]["status"] == "validated"
+        # ...and under the NCBI taxid, so either lookup path hits.
+        assert 1392 in out
+        assert out[1392]["validated_reads"] == 90
+
+    def test_ncbi_db_still_matches_by_taxid(self, tmp_path):
+        # db_taxid absent (NCBI database): behaviour unchanged, keyed by taxid.
+        import os
+        import time
+        kraken = tmp_path / "kraken2"
+        kraken.mkdir(exist_ok=True)
+        report = kraken / "barcode01.kraken2.report.txt"
+        report.write_text(
+            "100.00\t100\t0\tR\t1\troot\n"
+            " 90.00\t100\t100\tS\t562\tEscherichia coli\n"
+        )
+        t = time.time() - 120
+        os.utime(report, (t, t))
+        blast = tmp_path / "validation" / "blast"
+        blast.mkdir(parents=True, exist_ok=True)
+        (blast / "barcode01_taxid562.blast.tsv").write_text("r0\tref\t98\n")
+        out = load_blast_validation_data(
+            str(tmp_path), [{"taxid": 562, "name": "Escherichia coli"}])
+        assert out[562]["validated_reads"] == 1
+        assert out[562]["total_reads"] == 100

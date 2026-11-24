@@ -7,12 +7,21 @@ and retrieves their sequences from the original FASTQ files.
 
 import gzip
 import logging
+import re
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Callable
+from typing import Callable, Dict, Iterable, List, Optional, Set, Union
 from dataclasses import dataclass
 
 
 logger = logging.getLogger(__name__)
+
+_BATCH_NUMBER_RE = re.compile(r"batch_(\d+)")
+
+
+def _batch_number(path: Path) -> int:
+    """Numeric sort key for ``batch_N.kraken2.output.txt`` (10 after 9)."""
+    match = _BATCH_NUMBER_RE.search(path.name)
+    return int(match.group(1)) if match else -1
 
 
 @dataclass
@@ -53,50 +62,70 @@ class ReadExtractor:
 
         logger.info(f"Initialized ReadExtractor with results_dir: {self.results_dir}")
 
-    def find_kraken_output_file(self, sample: str) -> Optional[Path]:
+    def find_kraken_output_files(self, sample: str) -> List[Path]:
         """
-        Find the Kraken2 per-read output file for a sample.
+        Every Kraken2 per-read output file for a sample, in read order.
 
-        Args:
-            sample: Sample name
+        The incremental classifier (the branch every GUI run and every
+        real-time run takes) publishes one per-read file PER BATCH under
+        ``kraken2/<sample>/batches/batch_N.kraken2.output.txt`` and, at
+        session end, the concatenated
+        ``kraken2/<sample>.cumulative.kraken2.output.txt``. The flat
+        ``<sample>.kraken2.output.txt`` comes from the standard branch only.
+        Looking for the flat names alone found nothing after any default run
+        (audit 2026-11-06, finding 4). Resolution order:
 
-        Returns:
-            Path to Kraken2 output file or None if not found
+        1. the cumulative output (complete, one file);
+        2. all ``batches/`` files, each holding different reads;
+        3. the flat standard-branch names;
+        4. the retired flat ``<sample>_batchN`` snapshots (latest only);
+        5. ``<sample>.merged.kraken2.output.txt``.
         """
-        # Try multiple file patterns (nanometanf output formats)
-        patterns = [
-            f"{sample}.kraken2",
-            f"{sample}.kraken2.output.txt",
-            f"{sample}.kraken2.output",
-            f"{sample}_kraken2.output",
-        ]
+        cumulative = self.kraken2_dir / f"{sample}.cumulative.kraken2.output.txt"
+        if cumulative.exists():
+            logger.info(f"Found cumulative Kraken2 output: {cumulative}")
+            return [cumulative]
 
-        for pattern in patterns:
-            path = self.kraken2_dir / pattern
+        batches = sorted(
+            (self.kraken2_dir / sample / "batches").glob("batch_*.kraken2.output.txt"),
+            key=_batch_number,
+        )
+        if batches:
+            logger.info(f"Found {len(batches)} incremental Kraken2 batch outputs for {sample}")
+            return batches
+
+        for name in (f"{sample}.kraken2", f"{sample}.kraken2.output.txt",
+                     f"{sample}.kraken2.output", f"{sample}_kraken2.output"):
+            path = self.kraken2_dir / name
             if path.exists():
                 logger.info(f"Found Kraken2 output: {path}")
-                return path
+                return [path]
 
-        # Check for batch output files (real-time mode produces per-batch files)
-        import glob as glob_mod
-        batch_pattern = str(self.kraken2_dir / f"{sample}_batch*.kraken2.output.txt")
-        batch_files = sorted(glob_mod.glob(batch_pattern))
-        if batch_files:
-            logger.info(f"Found batch Kraken2 output: {batch_files[-1]}")
-            return Path(batch_files[-1])
+        snapshots = sorted(self.kraken2_dir.glob(f"{sample}_batch*.kraken2.output.txt"))
+        if snapshots:
+            logger.info(f"Found batch Kraken2 output: {snapshots[-1]}")
+            return [snapshots[-1]]
 
-        # Check for merged output in parent kraken2 directory
         merged_path = self.kraken2_dir / f"{sample}.merged.kraken2.output.txt"
         if merged_path.exists():
             logger.info(f"Found merged Kraken2 output: {merged_path}")
-            return merged_path
+            return [merged_path]
 
         logger.warning(f"Kraken2 output not found for sample: {sample}")
-        return None
+        return []
+
+    def find_kraken_output_file(self, sample: str) -> Optional[Path]:
+        """The first of :meth:`find_kraken_output_files`, or None.
+
+        Kept for callers that want one path; an incremental run has one
+        file per batch, so new code should take the list.
+        """
+        files = self.find_kraken_output_files(sample)
+        return files[0] if files else None
 
     def get_read_ids_for_taxid(
         self,
-        kraken_output: Path,
+        kraken_output: Union[Path, Iterable[Path]],
         taxid: int,
         include_children: bool = True,
         progress_callback: Optional[Callable[[int, int], None]] = None
@@ -105,7 +134,9 @@ class ReadExtractor:
         Extract read IDs classified to a specific taxid from Kraken2 output.
 
         Args:
-            kraken_output: Path to Kraken2 per-read output file
+            kraken_output: Path to a Kraken2 per-read output file, or the
+                           files of one sample (an incremental run has one per
+                           batch; each holds different reads)
             taxid: Target taxonomy ID
             include_children: If True, also include reads classified to child taxa
                               (currently not implemented - requires taxonomy tree)
@@ -114,32 +145,30 @@ class ReadExtractor:
         Returns:
             Set of read IDs classified to the taxid
         """
+        files = [kraken_output] if isinstance(kraken_output, (str, Path)) else list(kraken_output)
         read_ids = set()
         total_lines = 0
 
         # Count total lines for progress reporting
         if progress_callback:
-            with open(kraken_output, 'r') as f:
-                total_lines = sum(1 for _ in f)
+            for path in files:
+                with open(path, 'r') as f:
+                    total_lines += sum(1 for _ in f)
 
         processed = 0
-        with open(kraken_output, 'r') as f:
-            for line in f:
-                processed += 1
-                if progress_callback and processed % 100000 == 0:
-                    progress_callback(processed, total_lines)
+        for path in files:
+            with open(path, 'r') as f:
+                for line in f:
+                    processed += 1
+                    if progress_callback and processed % 100000 == 0:
+                        progress_callback(processed, total_lines)
 
-                parts = line.strip().split('\t')
-                if len(parts) >= 3:
-                    classified = parts[0]  # C = classified, U = unclassified
-                    read_id = parts[1]
-                    read_taxid_str = parts[2]
-
-                    if classified == 'C':
+                    parts = line.strip().split('\t')
+                    if len(parts) >= 3 and parts[0] == 'C':
+                        # C = classified, U = unclassified
                         try:
-                            read_taxid = int(read_taxid_str)
-                            if read_taxid == taxid:
-                                read_ids.add(read_id)
+                            if int(parts[2]) == taxid:
+                                read_ids.add(parts[1])
                         except ValueError:
                             continue
 
@@ -272,7 +301,7 @@ class ReadExtractor:
             if progress_callback:
                 progress_callback("Finding Kraken2 output...", 10)
 
-            kraken_output = self.find_kraken_output_file(sample)
+            kraken_output = self.find_kraken_output_files(sample)
             if not kraken_output:
                 return ExtractionResult(
                     taxid=taxid,
@@ -374,20 +403,21 @@ class ReadExtractor:
         Returns:
             Dictionary mapping taxid to read count
         """
-        kraken_output = self.find_kraken_output_file(sample)
-        if not kraken_output:
+        kraken_outputs = self.find_kraken_output_files(sample)
+        if not kraken_outputs:
             return {}
 
         taxid_counts: Dict[int, int] = {}
 
-        with open(kraken_output, 'r') as f:
-            for line in f:
-                parts = line.strip().split('\t')
-                if len(parts) >= 3 and parts[0] == 'C':
-                    try:
-                        taxid = int(parts[2])
-                        taxid_counts[taxid] = taxid_counts.get(taxid, 0) + 1
-                    except ValueError:
-                        continue
+        for kraken_output in kraken_outputs:
+            with open(kraken_output, 'r') as f:
+                for line in f:
+                    parts = line.strip().split('\t')
+                    if len(parts) >= 3 and parts[0] == 'C':
+                        try:
+                            taxid = int(parts[2])
+                            taxid_counts[taxid] = taxid_counts.get(taxid, 0) + 1
+                        except ValueError:
+                            continue
 
         return taxid_counts

@@ -26,8 +26,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional, Tuple
 
-#: The oldest nanometanf whose schema declares every parameter this GUI sends.
-NANOMETANF_MIN_VERSION = "1.11.0"
+#: The oldest nanometanf that accepts every parameter shape this GUI sends.
+#: 1.12.0 (dev since 2026-11) types ``sample_name`` and ``taxids_to_validate``
+#: as string-or-integer, so a digit-only sample name and the single-taxid
+#: on-demand call pass nf-schema, and runs ``PIPELINE_INITIALISATION`` for
+#: ``--validation_only``; 1.11.0 refused all three. A ``1.12.0dev`` checkout
+#: passes this floor (``check_pipeline_compatibility`` accepts the
+#: development pre-release of exactly the floor version).
+NANOMETANF_MIN_VERSION = "1.12.0"
 
 #: Where a resolved Nextflow assets root keeps the default remote
 #: repository's checkout (NextflowManager.DEFAULT_REMOTE_REPO).

@@ -117,3 +117,17 @@ class TestReportMissingPaths:
     def test_non_string_excluded(self):
         config = {"data_dir": 42}
         assert report_missing_paths(config) == {}
+
+    def test_bundle_relative_sentinel_not_reported_missing(self, tmp_path):
+        # ./pipeline_source is a bundle-relative sentinel normalise_path
+        # preserves; it must not be os.path.exists-checked against cwd and
+        # reported missing (bug audit 2026-11-08, finding 6).
+        import os
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            config = {"pipeline_source": "./pipeline_source",
+                      "nextflow_plugins": "../nextflow_plugins"}
+            assert report_missing_paths(config) == {}
+        finally:
+            os.chdir(cwd)

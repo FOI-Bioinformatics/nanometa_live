@@ -63,6 +63,27 @@ def _missing_reference_status(no_db, no_genome, n_taxids):
     return ValidationStatus("missing_dbs", "warning", headline, " ".join(detail_parts))
 
 
+def _visualization_status(has_results: bool, results_count: int) -> ValidationStatus:
+    """Visualization-only mode: the folder, not the setting, decides.
+
+    The setting describes the next run; pointing the operator at it ("Enable
+    it in the Configuration tab") about an analysis already on disk was
+    wrong, and contradicted a form showing it switched on.
+    """
+    if has_results:
+        return ValidationStatus(
+            "results", "success",
+            f"Validation results available for {results_count} organism(s).",
+            "",
+        )
+    return ValidationStatus(
+        "no_results_viz", "secondary",
+        "No validation results in this results folder.",
+        "Confirmation testing did not run for this analysis, or its "
+        "results were not kept.",
+    )
+
+
 def compute_validation_status(
     *,
     blast_enabled: bool,
@@ -73,13 +94,18 @@ def compute_validation_status(
     pipeline_running: bool,
     realtime: bool,
     results_count: int = 0,
+    visualization_only: bool = False,
 ) -> ValidationStatus:
     """Decide what the Validation tab should tell the operator.
 
     Precedence (first match wins): disabled -> no results dir -> no enabled
     organism -> missing genomes/databases -> results present -> run in progress
     (realtime refreshes each batch, batch runs to completion) -> waiting.
+    Visualization-only mode is decided first, see _visualization_status.
     """
+    if visualization_only:
+        return _visualization_status(has_results, results_count)
+
     if not blast_enabled:
         return ValidationStatus(
             "disabled", "secondary",
@@ -146,7 +172,11 @@ def build_validation_status_payload(config, results_dir_ok, backend_status,
     effort; the network is never touched) and delegates wording to
     :func:`compute_validation_status`.
     """
-    blast_enabled = bool(config and config.get("blast_validation", False))
+    # Same default as the Configuration form (default_config()); a False
+    # default here said "disabled" beside a form showing it switched on.
+    from nanometa_live.core.config.config_loader import default_config
+    blast_enabled = bool(config and config.get(
+        "blast_validation", default_config()["blast_validation"]))
     validation_taxids: List[str] = []
     db_status = None
     if blast_enabled and config:
@@ -173,6 +203,7 @@ def build_validation_status_payload(config, results_dir_ok, backend_status,
         pipeline_running=bool(backend_status and backend_status.get("running")),
         realtime=bool(config and config.get("processing_mode") == "realtime"),
         results_count=results_count,
+        visualization_only=bool(config and config.get("visualization_only")),
     )
     return {
         "code": status.code,
@@ -185,6 +216,7 @@ def build_validation_status_payload(config, results_dir_ok, backend_status,
 
 _EMPTY_STATE_VIEW = {
     "disabled": ("Validation Disabled", "bi-shield-x"),
+    "no_results_viz": ("No Validation Results", "bi-shield-slash"),
     "no_results_dir": ("Results Directory Missing", "bi-folder-x"),
     "no_species": ("Nothing To Validate", "bi-shield-slash"),
     "missing_dbs": ("Reference Databases Missing", "bi-database-exclamation"),

@@ -22,6 +22,7 @@ def create_validation_status_card(
     total: int = 0,
     reads_validated: int = 0,
     reads_total: int = 0,
+    failed: int = 0,
 ) -> dbc.Card:
     """
     Create a summary card showing validation status counts plus the
@@ -43,6 +44,8 @@ def create_validation_status_card(
         reads_validated: Reads that passed validation across all species
         reads_total: Total reads tested by the validation flow
             (Kraken2-classified reads handed to BLAST/minimap2)
+        failed: Validations whose process failed; named on a line of its
+            own when non-zero (it used to be counted as No Data)
 
     Returns:
         dbc.Card component
@@ -85,6 +88,13 @@ def create_validation_status_card(
                     ], className="text-center")
                 ], md=3),
             ]),
+        ] + ([
+            html.Div([
+                html.I(className="bi bi-x-octagon me-2"),
+                f"{failed} validation{'s' if failed != 1 else ''} failed "
+                "(the check itself did not complete); see the run log.",
+            ], className="text-danger small text-center mt-2"),
+        ] if failed else []) + [
             html.Hr(className="my-3"),
             # Aggregate footer. Two lines: species-checked count, then
             # the actual read totals so operators can answer "is this

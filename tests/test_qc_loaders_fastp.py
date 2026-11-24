@@ -75,3 +75,43 @@ def test_empty_dir_yields_empty_stats(tmp_path):
     assert stats == _empty_fastp_stats()
     assert stats["total_reads_before"] == 0
     assert load_fastp_per_sample(str(tmp_path)) == []
+
+
+def _fastp_json(path, n, age_seconds):
+    import json
+    path.write_text(json.dumps({
+        "summary": {
+            "before_filtering": {"total_reads": n, "total_bases": n * 1000},
+            "after_filtering": {"total_reads": n, "total_bases": n * 1000,
+                                "q30_bases": n * 500},
+        },
+        "filtering_result": {"passed_filter_reads": n},
+    }))
+    t = time.time() - age_seconds
+    os.utime(path, (t, t))
+
+
+def test_fastp_total_skipped_for_instability_is_not_cached(tmp_path, monkeypatch):
+    """Audit 2026-11-06, finding 10: in batch mode the last fastp JSON
+    written is inside the stability window of the poll that first sees it;
+    the reduced total was cached under a fingerprint that already included
+    that file, so it stayed out of the QC totals until something else changed
+    under fastp/. The window closes by time passing, which changes no mtime."""
+    from nanometa_live.core.utils import loader_utils
+    loader_utils.clear_all_loader_caches()
+    loader_utils._freshness_epoch = 0
+    fastp = tmp_path / "fastp"
+    fastp.mkdir()
+    _fastp_json(fastp / "barcode01.fastp.json", 100, age_seconds=10)
+    _fastp_json(fastp / "barcode02.fastp.json", 100, age_seconds=0)
+
+    assert load_fastp_data(str(tmp_path))["total_reads_after"] == 100, (
+        "precondition: the young file is skipped on the first poll")
+    assert len(load_fastp_per_sample(str(tmp_path))) == 1
+
+    real = time.time
+    monkeypatch.setattr(loader_utils.time, "time", lambda: real() + 5.0)
+    assert load_fastp_data(str(tmp_path))["total_reads_after"] == 200, (
+        "the reduced total was served from the mtime cache after the window closed")
+    assert len(load_fastp_per_sample(str(tmp_path))) == 2
+    loader_utils.clear_all_loader_caches()

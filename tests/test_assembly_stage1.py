@@ -5,6 +5,7 @@ succeed and publish a number that was not a result, and that a failed assembly
 reached no surface at all. These pin the GUI half of the repair.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -423,3 +424,46 @@ class TestAssemblyReadiness:
             {"enable_assembly": False, "processing_mode": "batch",
              "results_output_directory": str(tmp_path)})
         assert not [c for c in report.checks if c.name == "Assembly"]
+
+
+class TestDeclinedBesideProduced:
+    """A run where some targets assembled and others were declined.
+
+    Decision records rendered only when nothing was assembled: one assembly
+    hid every declined target, so the panel read as though one target had
+    been attempted (2026-11-23 bug hunt).
+    """
+
+    def _declined(self, sample, taxid):
+        return {"sample": sample, "taxid": taxid, "decision": "declined",
+                "reason": "insufficient_depth", "estimated_depth": 1.9,
+                "required_depth": 30.0,
+                "reason_text": "Estimated depth 1.9x of the 30x needed."}
+
+    def test_declined_targets_are_listed_under_the_assemblies(self):
+        out = _text(build_assembly_panel(
+            [_stats()], enabled=True,
+            decisions=[self._declined("barcode06", 263),
+                       self._declined("barcode07", 263),
+                       {"sample": "barcode05", "decision": "attempt"}]))
+        assert "barcode05" in out
+        assert "barcode06, taxid 263" in out
+        assert "barcode07, taxid 263" in out
+
+    def test_scoped_assemblies_of_one_sample_are_told_apart(self, tmp_path):
+        from nanometa_live.core.utils.assembly_loader import load_assembly_stats
+        base = tmp_path / "canonical" / "assembly"
+        base.mkdir(parents=True)
+        for name in ("barcode05.assembly_stats.json",
+                     "barcode05.taxid263.assembly_stats.json"):
+            (base / name).write_text(json.dumps(
+                {"sample_id": "barcode05", "summary": {}, "contigs": []}))
+        out = _text(build_assembly_panel(load_assembly_stats(str(tmp_path)),
+                                         enabled=True))
+        assert "barcode05, taxid 263" in out
+
+    def test_failed_tasks_are_named_beside_the_assemblies(self):
+        out = _text(build_assembly_panel([_stats()], enabled=True,
+                                         failed_samples=["barcode09"]))
+        assert "barcode09" in out
+        assert "failed" in out.lower()

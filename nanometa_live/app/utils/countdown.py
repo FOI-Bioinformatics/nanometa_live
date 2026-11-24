@@ -17,6 +17,20 @@ WARN_THRESHOLD_S = 5 * 60
 DANGER_THRESHOLD_S = 60
 
 
+def remaining_from_deadline(deadline: Optional[float], now: float) -> Optional[int]:
+    """Seconds left until ``deadline`` (epoch), floored at 0; None without one.
+
+    The backend publishes the deadline rather than the seconds left, so the
+    backend-status Store does not change on every tick.
+    """
+    if deadline is None:
+        return None
+    try:
+        return max(0, int(float(deadline) - float(now)))
+    except (TypeError, ValueError):
+        return None
+
+
 def format_countdown(remaining_s: Optional[int]) -> Optional[str]:
     """Format a remaining-seconds value for display.
 

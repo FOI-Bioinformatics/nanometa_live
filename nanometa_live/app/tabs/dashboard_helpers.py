@@ -27,9 +27,10 @@ from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
     load_nanoplot_stats,
     load_seqkit_stats,
+    summarize_seqkit_rows,
 )
 from nanometa_live.core.utils.alert_engine import get_alert_engine
-from nanometa_live.core.taxonomy.ranks import species_rank_mask
+from nanometa_live.core.taxonomy.ranks import species_rank_mask, count_organisms_found
 from nanometa_live.core.utils.attribution import (  # noqa: F401  (re-exported)
     PER_SAMPLE_DISCOVERY_FLOOR,
     PathogenAttribution,
@@ -409,6 +410,16 @@ def compute_detection_confidence(reads, abundance_pct=None) -> str:
     return "N/A"
 
 
+def _card_confidence(reads) -> str:
+    """Alert-card confidence label: the modal's bands, in the card's case.
+
+    One detection must carry one confidence on the card and in the Pathogen
+    Report modal; the card used HIGH >= 100 else MODERATE, so 5 reads were
+    MODERATE on the card and Low in the modal.
+    """
+    return compute_detection_confidence(reads).upper()
+
+
 def _meta_row(label: str, value: Any, badge: Optional[str] = None) -> html.Div:
     val = (
         dbc.Badge(value, color=badge, className="ms-1")
@@ -601,7 +612,10 @@ def _lookup_organism_reads(taxids: Any, config: Dict[str, Any],
                     if match.empty:
                         continue
                     row = match.iloc[0]
-                    out["reads_int"] = int(row.get('reads', 0))
+                    # Cumulative (clade) reads, as on the cards: a species
+                    # whose reads all sit in its subspecies has 0 direct
+                    # reads and the modal said "0 sequences detected".
+                    out["reads_int"] = int(row.get('cumul_reads', row.get('reads', 0)) or 0)
                     out["reads"] = f"{out['reads_int']:,}"
                     out["abundance"] = f"{row.get('%', 0):.1f}%"
                     out["name"] = str(row.get("name", "")).strip()
@@ -821,6 +835,7 @@ from nanometa_live.app.tabs.verdict_states import (  # noqa: F401
     VerdictDescriptor,
     pipeline_error_descriptor as _pipeline_error_descriptor,
     results_unavailable_descriptor as _results_unavailable_descriptor,
+    results_unreadable_descriptor as _results_unreadable_descriptor,
     with_failure_clauses as _with_failure_clauses,
 )
 
@@ -976,7 +991,8 @@ def _shallow_depth_clause(
 
 def _action_required_subtitle(n_found: int, n_watched: int,
                               validation_has_results: bool,
-                              depth_clause: str = "") -> str:
+                              depth_clause: str = "",
+                              n_moderate: int = 0) -> str:
     """Subtitle for ACTION REQUIRED.
 
     n_found counts only entries above each pathogen's alert_threshold; the
@@ -984,8 +1000,15 @@ def _action_required_subtitle(n_found: int, n_watched: int,
     counters legitimately differ. The wording makes the threshold gate
     explicit, states the depth when it is too low to stand on its own, and
     flags when confirmatory validation has not yet run.
+
+    ``n_found`` counts the critical and high hits -- exactly those the banner
+    names under "Above threshold:". Moderate hits above threshold are stated
+    separately; counting them in ``n_found`` put a larger number above a
+    shorter list.
     """
     sub = f"{n_found} of {n_watched} watched pathogens above alert threshold"
+    if n_moderate:
+        sub += f", plus {n_moderate} moderate-risk"
     sub += depth_clause
     if not validation_has_results:
         sub += " — pending confirmatory validation"
@@ -1015,8 +1038,9 @@ def _detection_descriptor(
             icon="exclamation-octagon-fill", icon_color="#8b0000",
             title="ACTION REQUIRED",
             subtitle=_action_required_subtitle(
-                len(dangerous), n_watched, validation_has_results,
-                depth_clause),
+                len(critical) + len(high_risk), n_watched,
+                validation_has_results, depth_clause,
+                n_moderate=len(dangerous) - len(critical) - len(high_risk)),
             sub_color="#721c24", bg_color="#f8d7da",
             border_color="#8b0000",
             show_icon_mobile=True, needs_attribution=True,
@@ -1095,6 +1119,7 @@ def _data_verdict(
     failed_tasks=0,
     input_layout_mismatch=None,
     batch_progress_clause=None,
+    disk_low=None,
 ) -> VerdictDescriptor:
     """The data-available branch of select_verdict (extracted, still pure).
 
@@ -1105,7 +1130,8 @@ def _data_verdict(
     health = dict(stale_samples=stale_samples, run_stopped=run_stopped,
                   stop_reason=stop_reason, failed_tasks=failed_tasks,
                   input_layout_mismatch=input_layout_mismatch,
-                  batch_progress_clause=batch_progress_clause)
+                  batch_progress_clause=batch_progress_clause,
+                  disk_low=disk_low)
     if dangerous:
         return _with_failure_clauses(
             _detection_descriptor(
@@ -1156,12 +1182,14 @@ def _data_verdict(
 
 
 def _run_health(stale_samples, run_stopped, stop_reason, failed_tasks,
-                input_layout_mismatch, batch_progress_clause=None):
+                input_layout_mismatch, batch_progress_clause=None,
+                disk_low=None):
     """The run-health inputs a data-state verdict carries into its subtitle."""
     return dict(stale_samples=stale_samples, run_stopped=run_stopped,
                 stop_reason=stop_reason, failed_tasks=failed_tasks,
                 input_layout_mismatch=input_layout_mismatch,
-                batch_progress_clause=batch_progress_clause)
+                batch_progress_clause=batch_progress_clause,
+                disk_low=disk_low)
 
 
 def select_verdict(
@@ -1187,30 +1215,19 @@ def select_verdict(
     failed_tasks: int = 0,
     input_layout_mismatch: Optional[str] = None,
     batch_progress_clause: Optional[str] = None,
+    disk_low: Optional[str] = None,
+    load_failed: bool = False,
+    load_error: Optional[str] = None,
 ) -> VerdictDescriptor:
     """Pure decision: pick the verdict banner state from the analysis inputs.
 
-    Mirrors the original update_verdict_banner control flow exactly:
-
-    1. No config -> SCREENING when running, otherwise STANDBY.
-    2. overall_status == "starting" -> SCREENING (takes priority over data).
-    3. Results directory present with Kraken data -> classify the watchlist
-       hits: any critical/high-risk hit -> ACTION REQUIRED; other hits ->
-       MONITORING; no hits -> ALL CLEAR. ``pipeline_error`` outranks every
-       non-hit state in this branch (a dead pipeline must never render as a
-       clean result) but never a hit -- detections and sub-threshold hits
-       keep their state with the failure noted in the subtitle.
-    4. Results directory previously seen but now unreadable
-       (``results_dir_lost``) -> RESULTS UNAVAILABLE; a crashed run with no
-       output (``pipeline_error``) -> PIPELINE ERROR. Both distinct from
-       STANDBY on purpose.
-    5. Results directory present but no data yet and still running -> SCREENING.
-    6. Everything else (no results dir, idle with no data, load failure) ->
-       STANDBY.
-
-    ``stale_samples`` appends a clause to the data-state subtitles so
-    frozen numbers cannot present as live ones; ``run_stopped`` does the
-    same for a run ended before its input was exhausted (round-4 H2).
+    Precedence: no config -> SCREENING/STANDBY; starting -> SCREENING (a
+    dead pipeline outranks it); data present -> ``_data_verdict`` (a hit
+    always wins, ``pipeline_error`` outranks every non-hit state); no data
+    -> ``_no_data_verdict`` (RESULTS UNAVAILABLE, PIPELINE ERROR, RESULTS
+    UNREADABLE, SCREENING while running, else STANDBY). The run-health
+    inputs become subtitle clauses on the data states so frozen or partial
+    numbers cannot present as live, complete ones.
     """
     if not has_config:
         return _screening_descriptor() if pipeline_running else _standby_descriptor()
@@ -1234,7 +1251,7 @@ def select_verdict(
             pipeline_error_detail=pipeline_error_detail,
             **_run_health(stale_samples, run_stopped, stop_reason,
                           failed_tasks, input_layout_mismatch,
-                          batch_progress_clause),
+                          batch_progress_clause, disk_low),
         )
 
     return _no_data_verdict(
@@ -1243,12 +1260,15 @@ def select_verdict(
         pipeline_error=pipeline_error,
         pipeline_error_detail=pipeline_error_detail,
         pipeline_running=pipeline_running,
+        load_failed=load_failed,
+        load_error=load_error,
     )
 
 
 def _no_data_verdict(
     *, results_dir_lost, main_dir_available, pipeline_error,
-    pipeline_error_detail, pipeline_running,
+    pipeline_error_detail, pipeline_running, load_failed=False,
+    load_error=None,
 ) -> VerdictDescriptor:
     """The no-Kraken-data tail of select_verdict (pure)."""
     # A directory that held data earlier and is now unreadable is an event
@@ -1259,6 +1279,10 @@ def _no_data_verdict(
     if pipeline_error:
         return _pipeline_error_descriptor(
             pipeline_error_detail, has_partial_data=False)
+    # The loader raised: "we could not read" is not "nothing to read"
+    # (field audit 2026-10-28, M1).
+    if load_failed:
+        return _results_unreadable_descriptor(load_error)
 
     # Results directory present but no rows yet, pipeline still producing them.
     if main_dir_available and pipeline_running:
@@ -1342,12 +1366,10 @@ def _calculate_overall_status(
     # Estimate quality score from data (simplified)
     quality_score = _estimate_quality_score(main_dir, kraken_df)
 
-    # Count organisms (species + genus level, >= 1 read, matching Organisms tab)
-    organisms_detected = 0
-    if not kraken_df.empty:
-        org_df = kraken_df[kraken_df["rank"].isin(["S", "G"])]
-        org_df = org_df[org_df["taxid"] > 1]
-        organisms_detected = len(org_df[org_df["reads"] >= 1])
+    # Count organisms by the Organisms tab's rule (species with reads plus
+    # genus-only identifications, cumulative reads); direct reads put the
+    # Dashboard at 1 against the Organisms tab's 2 for one sample.
+    organisms_detected = count_organisms_found(kraken_df)
 
     # Determine overall status
     if visualization_only and not pipeline_running:
@@ -1369,9 +1391,41 @@ def _calculate_overall_status(
         "total_reads": total_reads,
         "quality_score": quality_score,
         "organisms_detected": organisms_detected,
-        "active_alerts": 0,  # Calculated later in _generate_alerts
         "samples_processed": samples_processed,
         "total_samples": total_samples
+    }
+
+
+def run_status_for_alerts(backend_status: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The run-state keys ``_generate_alerts`` reads, from the backend status.
+
+    ``_generate_alerts`` took these keys from the overall-status dict, which
+    ``_calculate_overall_status`` never wrote, so the engine saw a run that
+    was never running, never completed, had no errors and no files: its
+    completion alert and its error alert could not fire (bug audit
+    2026-11-06, item 37). ``compute_overall_status_cache`` now merges this
+    dict into the cache from the backend status it already holds.
+
+    Translates the BackendManager status names (``files_processed``,
+    ``files_waiting``, the ``errors`` list) to the alert engine's
+    (``processed_files``, ``pending_files`` = waiting minus processed,
+    ``error_count``) and carries
+    ``running`` / ``completed`` through. Every value is a plain bool or int,
+    so the result can ride the ``dashboard-overall-status-cache`` Store.
+    """
+    status = backend_status or {}
+    waiting = int(status.get("files_waiting") or 0)
+    processed = int(status.get("files_processed") or 0)
+    return {
+        "running": bool(status.get("running", False)),
+        "completed": bool(status.get("completed", False)),
+        "error_count": len(status.get("errors") or []),
+        # files_waiting counts every read file in the watched folder,
+        # processed or not; passed through as pending, a mostly classified
+        # 400-file real-time folder raised "High number of pending files:
+        # 400" (threshold 50). Pending is the part not yet processed.
+        "pending_files": max(0, waiting - processed),
+        "processed_files": processed,
     }
 
 
@@ -1418,28 +1472,21 @@ def _estimate_quality_score(main_dir: str, kraken_df: pd.DataFrame) -> Optional[
                     score = max(30, int(q_score * 7))  # Below Q10 is concerning
                 logger.debug(f"Quality score from NanoPlot Q{q_score}: {score}")
 
-        # Still no score? Use read length as proxy
-        if score is None:
-            if qc_stats.get('source') != 'none':
-                avg_len = qc_stats.get('avg_read_length', 0)
-                if avg_len > 3000:
-                    score = 85
-                elif avg_len > 2000:
-                    score = 75
-                elif avg_len > 1000:
-                    score = 65
-                else:
-                    score = 50
-
+        # No measured quality: no score. A read-length proxy (under 1 kb ->
+        # 50) used to fill the gap, and the alert panel reported it as
+        # "Overall quality is 50.0%" beside a "--" quality tile.
         if score is None:
             return None
 
         # Adjust based on N50 (bonus for good read lengths)
         nanoplot_stats = load_nanoplot_stats(main_dir)
-        n50 = nanoplot_stats.get('read_length_n50', 0)
+        # An unknown N50 (None, or 0 when absent) is not a short-read N50:
+        # pooled seqkit rows report None, and penalising it as "very short
+        # reads" lowered the score for missing data.
+        n50 = nanoplot_stats.get('read_length_n50') or 0
         if n50 > 5000:
             score = min(100, score + 5)  # Bonus for long reads
-        elif n50 < 1000:
+        elif 0 < n50 < 1000:
             score -= 10  # Penalty for very short reads
 
         # Minor adjustment for classification rate (but don't over-penalize)
@@ -1573,12 +1620,16 @@ def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str
     )
 
 
-def _format_time_elapsed(start_time: Optional[str]) -> str:
+def _format_time_elapsed(start_time: Optional[str],
+                         ended_at: Optional[str] = None) -> str:
     """
     Format elapsed time since analysis start.
 
     Args:
         start_time: ISO format timestamp string
+        ended_at: ISO timestamp the run ended, for a finished run. The clock
+            stops there; without it a re-render after the run showed the
+            wall-clock time since Start.
 
     Returns:
         Formatted time string (HH:MM:SS)
@@ -1588,7 +1639,8 @@ def _format_time_elapsed(start_time: Optional[str]) -> str:
 
     try:
         start_dt = datetime.fromisoformat(start_time)
-        elapsed = datetime.now() - start_dt
+        end_dt = datetime.fromisoformat(ended_at) if ended_at else datetime.now()
+        elapsed = end_dt - start_dt
         hours, remainder = divmod(int(elapsed.total_seconds()), 3600)
         minutes, seconds = divmod(remainder, 60)
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
@@ -1627,22 +1679,25 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
             total_bases = 0
             mean_q = 0.0
             n50 = 0
-            class_rate = 0.0
+            class_rate: Optional[float] = None
             pass_rate = 100.0
 
             if not kraken_df.empty:
-                # Calculate sample metrics from Kraken
-                reads = int(kraken_df["reads"].sum())
-                org_df = kraken_df[kraken_df["rank"].isin(["S", "G"])]
-                org_df = org_df[org_df["taxid"] > 1]
-                organisms = len(org_df[org_df["reads"] >= 1])
+                # Same definition as the Dashboard tile: root + unclassified
+                # cumulative reads (never kraken_df["reads"].sum()).
+                classified_reads, unclassified_reads, rate = get_classification_stats(kraken_df)
+                reads = classified_reads + unclassified_reads
+                organisms = count_organisms_found(kraken_df)
 
-                # Classification rate calculation
-                unclassified = kraken_df[kraken_df["name"].str.contains("unclassified", case=False, na=False)]
-                if not unclassified.empty and reads > 0:
-                    unclassified_pct = (unclassified["reads"].sum() / reads) * 100
-                    class_rate = 100.0 - unclassified_pct
-
+                if reads == 0:
+                    # A report with no reads (nanometanf's placeholder for a
+                    # sample that produced nothing) is not a result: it must
+                    # not be graded, least of all as the best grade.
+                    quality = "No reads"
+                    status = "No reads"
+                else:
+                    class_rate = rate
+                    unclassified_pct = 100.0 - rate
                     if unclassified_pct < 30:
                         quality = "Good"
                         status = "Complete"
@@ -1652,17 +1707,14 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
                     else:
                         quality = "Poor"
                         status = "Issue Detected"
-                else:
-                    quality = "Excellent"
-                    status = "Complete"
-                    class_rate = 100.0
 
             # Try seqkit stats FIRST (per-sample data from chopper QC)
             seqkit_df = load_seqkit_stats(main_dir, sample)
             if not seqkit_df.empty:
                 # seqkit provides per-sample stats: sum_len, N50, AvgQual
                 total_bases = int(seqkit_df['sum_len'].sum()) if 'sum_len' in seqkit_df.columns else 0
-                n50 = int(seqkit_df['N50'].iloc[0]) if 'N50' in seqkit_df.columns and len(seqkit_df) > 0 else 0
+                # None (unknown) for a sum of batches; rendered as "--".
+                n50 = summarize_seqkit_rows(seqkit_df)["n50"] or 0
                 mean_q = float(seqkit_df['AvgQual'].iloc[0]) if 'AvgQual' in seqkit_df.columns and len(seqkit_df) > 0 else 0.0
                 logger.debug(f"Sample {sample}: Using seqkit stats - bases={total_bases}, n50={n50}, mean_q={mean_q}")
             else:
@@ -1671,7 +1723,7 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
                 if nanoplot_stats and nanoplot_stats.get("number_of_reads", 0) > 0:
                     total_bases = nanoplot_stats.get("total_bases", 0)
                     mean_q = nanoplot_stats.get("mean_read_quality", 0.0)
-                    n50 = nanoplot_stats.get("read_length_n50", 0)
+                    n50 = nanoplot_stats.get("read_length_n50") or 0
                     logger.debug(f"Sample {sample}: Using NanoPlot stats - bases={total_bases}, n50={n50}, mean_q={mean_q}")
 
             # Format bases for display
@@ -1703,7 +1755,8 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
                 "bases": bases_str,
                 "mean_q": f"{mean_q:.1f}" if mean_q > 0 else "--",
                 "n50": n50_str,
-                "class_rate": f"{class_rate:.1f}%" if class_rate > 0 else "--",
+                # A measured 0.0% is shown as such; "--" means not measured.
+                "class_rate": f"{class_rate:.1f}%" if class_rate is not None else "--",
                 "pass_rate": f"{pass_rate:.1f}%",
             })
 
@@ -1751,7 +1804,8 @@ def _generate_alerts(
     # Get global alert engine instance
     alert_engine = get_alert_engine()
 
-    # Prepare status dictionary for alert engine
+    # Prepare status dictionary for alert engine. The cache carries these
+    # keys from the backend status (run_status_for_alerts).
     status = {
         "running": overall_status.get("running", False),
         "completed": overall_status.get("completed", False),
@@ -1788,8 +1842,10 @@ def _generate_alerts(
         })
 
     # Prepare QC stats - use actual classification data from Kraken2
-    # instead of the crude heuristic _estimate_classified_rate
-    actual_classified_rate = 0.0
+    # instead of the crude heuristic _estimate_classified_rate. None means
+    # "not measured" (no report, or a report with no reads): the engine
+    # skips the check rather than reading 0.0 as a measured rate.
+    actual_classified_rate: Optional[float] = None
     try:
         kraken_df = load_kraken_data(main_dir, "All Samples")
         if not kraken_df.empty:
@@ -2028,7 +2084,7 @@ def _create_pathogen_alert_panel(
                             common_name=common_name,
                             read_count=reads,
                             abundance_pct=abundance,
-                            confidence="HIGH" if reads >= 100 else "MODERATE",
+                            confidence=_card_confidence(reads),
                             taxid=taxid,
                             recommendation=action,
                             samples=detection_samples,
@@ -2689,6 +2745,12 @@ def _load_validation_lookup(main_dir: str) -> Dict[Tuple[str, int], Dict[str, An
                 status = str(status_attr.value)
             else:
                 status = str(status_attr) if status_attr is not None else "no_data"
+            method = str(getattr(r, "validation_method", "blast") or "blast")
+            # BLAST and minimap2 report the same pair; the last one read
+            # used to win. BLAST (read-level confirmation) is kept.
+            existing = lookup.get((sample_id, taxid))
+            if existing is not None and existing["method"] == "blast" and method != "blast":
+                continue
             lookup[(sample_id, taxid)] = {
                 "status": status,
                 "identity": float(getattr(r, "percent_identity_mean", 0.0) or 0.0),
@@ -2754,12 +2816,22 @@ def _summarise_validation_for_taxid(
         return None
 
     best = max(rows, key=lambda e: _VALIDATION_RANK.get(e.get("status", "no_data"), 0))
-    avg_identity = sum(r["identity"] for r in rows) / len(rows)
+    best_rank = _VALIDATION_RANK.get(best.get("status", "no_data"), 0)
+    # Identity weighted by validated reads, over samples that measured one:
+    # a plain mean let a failed sample's 0 pull two 97% samples to 65%.
+    measured = [r for r in rows if (r.get("identity") or 0) > 0]
+    weight = sum(max(1, int(r.get("validated_reads", 0) or 0)) for r in measured)
+    identity = (sum(r["identity"] * max(1, int(r.get("validated_reads", 0) or 0))
+                    for r in measured) / weight) if measured else 0.0
     method = best.get("method", "blast")
     return {
         "status": best.get("status", "no_data"),
-        "identity": avg_identity,
+        "identity": identity,
         "method": method,
         "n_validated": len(rows),
         "n_samples": len(samples),
+        # Samples that reached the status shown: the badge states it when
+        # not all did (one confirmed of three read as "Validated").
+        "n_best": sum(1 for r in rows
+                      if _VALIDATION_RANK.get(r.get("status", "no_data"), 0) == best_rank),
     }

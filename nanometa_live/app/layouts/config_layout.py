@@ -291,7 +291,7 @@ def create_config_layout():
                             className="w-100"
                         ),
                         dbc.Tooltip(
-                            "Apply these settings and start/continue the analysis",
+                            "Apply these settings. A run starts with Start Analysis; a running run keeps its settings until the next Start.",
                             target="apply-config-button",
                             placement="top"
                         )
@@ -348,7 +348,7 @@ def create_config_layout():
                     html.I(className="bi bi-info-circle me-1 text-muted"),
                     html.Span(
                         "Click 'Apply Settings' to save and use these parameters; "
-                        "the applied configuration is restored on next launch. "
+                        "the applied configuration is kept as 'Last Session', which Load restores after a restart. "
                         "Unsaved edits are kept while you switch tabs but are only "
                         "persisted when you click 'Apply Settings'. "
                         "Use 'Save for Later' to store named presets.",

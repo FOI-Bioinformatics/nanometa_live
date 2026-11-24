@@ -57,8 +57,30 @@ class TestAggregateFastpReadStats:
         ]
         stats = aggregate_fastp_read_stats(summaries)
         assert stats["mean_length"] == pytest.approx(1750.0)
-        # GC is a simple mean of per-file after values: (40 + 60)/2 = 50.
-        assert stats["gc_content"] == pytest.approx(50.0)
+        # GC is a per-base figure, weighted by bases (here reads x mean
+        # length): (100k*40 + 600k*60) / 700k. A simple mean of the
+        # per-file values (50) let a small file count as much as a large one.
+        assert stats["gc_content"] == pytest.approx(
+            (100_000 * 40 + 600_000 * 60) / 700_000)
+
+    def test_mean_length_from_total_bases_when_no_mean_length_key(self):
+        """fastp summaries always carry total_bases and total_reads; the
+        mean-length key varies (read1_mean_length in fastp, and the mock
+        generator writes read_length_mean), and the card showed "No Read
+        Statistics" beside populated QC cards when it was missing."""
+        summaries = [
+            {"before_filtering": {"total_reads": 10, "total_bases": 12_000},
+             "after_filtering": {"total_reads": 8, "total_bases": 9_000,
+                                 "gc_content": 0.5}},
+            {"before_filtering": {"total_reads": 30, "total_bases": 60_000},
+             "after_filtering": {"total_reads": 30, "total_bases": 60_000,
+                                 "gc_content": 0.4}},
+        ]
+        stats = aggregate_fastp_read_stats(summaries)
+        assert stats["mean_length"] == pytest.approx(69_000 / 38)
+        assert stats["mean_length_before"] == pytest.approx(72_000 / 40)
+        assert stats["gc_content"] == pytest.approx(
+            (9_000 * 50 + 60_000 * 40) / 69_000)
 
     def test_zero_gc_excluded(self):
         stats = aggregate_fastp_read_stats([self._summary(10, 100, 10, 100, 0)])
@@ -131,8 +153,22 @@ class TestComputeQcStatLines:
         assert "(est.)" in lines[3]
 
     def test_zero_prefilter_shows_unavailable(self):
-        lines = compute_qc_stat_lines(**self._counts(tot_reads_pre_filt=0))
-        assert "not available for Chopper pipeline" in lines[0]
+        """No pre-filter count (chopper and filtlong record none): no pass
+        rate and no removal breakdown, rather than 0% or a fabricated split
+        (live test 2026-11-24: "Raw reads (pre-Chopper): 1,660 / passed
+        filtering: 1,660 (100.0%)")."""
+        lines = compute_qc_stat_lines(**self._counts(
+            tot_reads_pre_filt=0, tot_removed_reads=0, tot_low_quality_reads=0,
+            tot_too_short_reads=0, tot_too_many_N_reads=0))
+        assert "not recorded" in lines[0]
+        assert lines[1] == "Reads that passed filtering: 900"
+        assert "not recorded" in lines[2]
+        for line in lines[3:6]:
+            assert "not recorded" in line
+
+    def test_label_names_no_tool(self):
+        lines = compute_qc_stat_lines(**self._counts())
+        assert lines[0].startswith("Raw reads (before filtering)")
 
     def test_seqkit_overcount_adjusts_baseline(self):
         # passed > pre_filt -> baseline bumped, removed zeroed, passed shows 100%.

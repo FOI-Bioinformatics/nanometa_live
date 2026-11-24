@@ -109,6 +109,13 @@ _VALIDATION_BADGE_STYLES = {
 }
 
 
+# The middle confidence band. The alert panel passes "MODERATE", the word the
+# Pathogen Report modal uses (compute_detection_confidence); "MEDIUM" is kept
+# for callers that still pass it. Testing only for "MEDIUM" drew a MODERATE
+# card's certainty bar as the red 25% of LOW.
+_MID_CONFIDENCE = ("MODERATE", "MEDIUM")
+
+
 def _validation_badge(
     validation: Optional[Dict[str, Any]],
     *,
@@ -146,7 +153,11 @@ def _validation_badge(
     if show_identity and status in ("confirmed", "validated", "partial", "uncertain"):
         identity = validation.get("identity") or 0.0
         if identity > 0:
-            label = f"{label} {identity:.0f}%"
+            # Named: "Validated 97%" read as 97% of reads validated.
+            label = f"{label} \u00b7 {identity:.0f}% identity"
+    n_best, n_samples = validation.get("n_best"), validation.get("n_samples")
+    if n_best and n_samples and n_best < n_samples:
+        label = f"{label} (in {n_best} of {n_samples} samples)"
 
     n_validated = validation.get("n_validated", 0)
     n_samples = validation.get("n_samples", 0)
@@ -352,8 +363,8 @@ def CriticalPathogenAlert(
                 html.Div([
                     html.Small("Detection certainty", className="text-muted me-2"),
                     dbc.Progress(
-                        value=100 if confidence == "HIGH" else 60 if confidence == "MEDIUM" else 25,
-                        color="success" if confidence == "HIGH" else "warning" if confidence == "MEDIUM" else "danger",
+                        value=100 if confidence == "HIGH" else 60 if confidence in _MID_CONFIDENCE else 25,
+                        color="success" if confidence == "HIGH" else "warning" if confidence in _MID_CONFIDENCE else "danger",
                         style={"height": "6px", "flex": "1"},
                         className="my-1"
                     ),
@@ -489,7 +500,8 @@ def HighRiskPathogenAlert(
                "borderLeft": f"6px solid {threat['border_color']}",
                "borderRadius": "8px"
            })
-    ], className="mb-3", role="alert")
+    # Light card background in both themes: dark ink in dark mode.
+    ], className="mb-3 on-light-surface", role="alert")
 
 
 def WatchedSpeciesAlert(
@@ -556,7 +568,7 @@ def WatchedSpeciesAlert(
     return html.Div([
         html.Div(
             inner_children,
-            className="p-2",
+            className="p-2 on-light-surface",
             style={
                 "backgroundColor": threat["bg_color"],
                 # 6px left-border + 8px radius matches the
@@ -572,13 +584,3 @@ def WatchedSpeciesAlert(
     ], className="mb-2")
 
 
-def _calculate_confidence(pathogen: Dict[str, Any]) -> str:
-    """Calculate confidence level based on read count and other metrics."""
-    reads = pathogen.get("reads", 0)
-
-    if reads >= 100:
-        return "HIGH"
-    elif reads >= 20:
-        return "MEDIUM"
-    else:
-        return "LOW"

@@ -35,13 +35,21 @@ def register_navigation(app, backend_manager):
             Input("welcome-shown", "data"),
             Input("close-welcome-modal", "n_clicks"),
         ],
+        State("app-config", "data"),
         prevent_initial_call="initial_duplicate",
     )
-    def manage_welcome_modal(already_shown, close_clicks):
-        """Show the welcome modal on first visit, dismiss on button click."""
+    def manage_welcome_modal(already_shown, close_clicks, config):
+        """Show the welcome modal on first visit, dismiss on button click.
+
+        Not in visualization-only mode: the modal walks through configure ->
+        prepare -> Start Analysis and suggests --main_dir, while that mode
+        has Start disabled and was itself opened with --main_dir.
+        """
         triggered = dash.ctx.triggered_id
         if triggered == "close-welcome-modal":
             return False, "config-tab"
+        if (config or {}).get("visualization_only"):
+            return False, no_update
         # Show on first visit only
         if not already_shown:
             return True, no_update
@@ -499,19 +507,49 @@ def register_navigation(app, backend_manager):
         Output("start-stop-button", "n_clicks", allow_duplicate=True),
         Input("preparation-start-analysis-btn", "n_clicks"),
         State("start-stop-button", "n_clicks"),
+        State("start-stop-button", "disabled"),
+        State("backend-status", "data"),
         prevent_initial_call=True,
     )
-    def proxy_preparation_start_to_header(n_prep, n_header):
+    def proxy_preparation_start_to_header(n_prep, n_header, header_disabled, status):
         """Proxy the Preparation-tab Start Analysis button into the
         header's start-stop-button.
 
         The existing start_or_prompt_stop callback gates on
         start-stop-button.n_clicks: bumping that count from here
-        triggers exactly the same readiness check, collision-modal,
-        and backend-launch flow as if the operator had clicked the
-        header button. Keeping the launch logic single-sourced
-        avoids accidental drift between the two CTAs.
+        runs the same server-side readiness gate (readiness_blocks_start,
+        which that callback applies on every click since the 2026-10-28
+        field audit; before it, this proxy walked past the header
+        button's disabled attribute and nothing else checked),
+        collision-modal, and backend-launch flow as if the operator had
+        clicked the header button. Keeping the launch logic
+        single-sourced avoids accidental drift between the two CTAs.
+
+        Only while the header button would itself act as Start: it is also
+        disabled in visualization-only mode, and during a run the header
+        button is Stop, so a click labelled Start opened the stop prompt.
         """
         if not n_prep:
             raise PreventUpdate
+        if header_disabled or (status or {}).get("running", False):
+            raise PreventUpdate
         return (n_header or 0) + 1
+
+    @app.callback(
+        Output("preparation-start-analysis-btn", "disabled"),
+        Output("preparation-start-analysis-btn", "title"),
+        Input("start-stop-button", "disabled"),
+        Input("backend-status", "data"),
+    )
+    def mirror_header_start_availability(header_disabled, status):
+        """Disable the Preparation-tab Start when the header Start cannot start.
+
+        The header's own disabled state already encodes visualization-only
+        mode and readiness; a run in progress is added here because the
+        header button is then an enabled Stop.
+        """
+        if (status or {}).get("running", False):
+            return True, "An analysis is already running"
+        if header_disabled:
+            return True, "Start is not available - see the header button for the reason"
+        return False, "Begin processing the nanopore sequence data"

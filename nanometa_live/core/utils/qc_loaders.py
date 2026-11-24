@@ -20,10 +20,10 @@ from nanometa_live.core.utils.sample_detector import (
 )
 from nanometa_live.core.utils.loader_utils import (
     _get_cache_key,
-    _check_mtime_cache,
-    _mtime_cache_state,
+    _mtime_cache_lookup,
     _store_mtime_cache,
     _is_file_stable,
+    StabilitySkips,
 )
 
 
@@ -64,30 +64,42 @@ def _empty_fastp_stats() -> Dict[str, int]:
 def _find_sample_files(directory: str, sample: str, extensions: List[str]) -> List[str]:
     """Glob a sample's flat and batch-suffixed files for each extension.
 
-    For each extension, matches ``<sample>.<ext>`` followed by
-    ``<sample>_*.<ext>`` (the batch-numbered companions written in
-    real-time mode), preserving that order.
+    For each extension, matches ``<sample>.<ext>`` followed by the
+    companions the pipeline writes, ``<sample>_batch<N>.<ext>`` and
+    ``<sample>_chunk<N>.<ext>``, preserving that order. A bare
+    ``<sample>_*`` also took a sibling sample ("NTC" matched "NTC_2",
+    "sample_A" matched "sample_A_rep1") and summed its reads in.
     """
+    companion = re.compile(
+        r"^" + re.escape(sample) + r"_(?:batch|chunk)\d+\.")
     files: List[str] = []
     for ext in extensions:
         files.extend(glob.glob(os.path.join(directory, f"{sample}.{ext}")))
-        files.extend(glob.glob(os.path.join(directory, f"{sample}_*.{ext}")))
+        files.extend(
+            f for f in sorted(glob.glob(os.path.join(directory, f"{sample}_*.{ext}")))
+            if companion.match(os.path.basename(f))
+        )
     return files
 
 
-def _aggregate_fastp_files(fastp_files: List[str]) -> Dict[str, Any]:
+def _aggregate_fastp_files(
+    fastp_files: List[str], skips: Optional[StabilitySkips] = None
+) -> Dict[str, Any]:
     """Aggregate FASTP statistics across one or more fastp.json files.
 
     Stable files are parsed and validated; unstable, malformed, or
     unreadable files are skipped. The q30 rate is recomputed from the
-    accumulated post-filtering q30 and total bases.
+    accumulated post-filtering q30 and total bases. A stability skip is
+    recorded on ``skips`` so the caller knows the total is transient.
     """
     aggregated_stats = _empty_fastp_stats()
     acc_q30_bases = 0
+    if skips is None:
+        skips = StabilitySkips()
 
     for fastp_file in fastp_files:
         try:
-            if not _is_file_stable(fastp_file):
+            if not skips.is_stable(fastp_file):
                 logging.debug(f"Skipping unstable file: {fastp_file}")
                 continue
 
@@ -162,14 +174,15 @@ def load_fastp_per_sample(main_dir: str) -> List[Dict[str, Any]]:
         return []
 
     mtime_key = f"fastp_per_sample:{main_dir}"
-    cached = _check_mtime_cache(mtime_key, [fastp_dir])
-    if cached is not None:
+    state, cached, fingerprint = _mtime_cache_lookup(mtime_key, [fastp_dir])
+    if state == "hit":
         return list(cached)
 
+    skips = StabilitySkips()
     rows: List[Dict[str, Any]] = []
     for fastp_file in glob.glob(os.path.join(fastp_dir, "*.fastp.json")):
         try:
-            if not _is_file_stable(fastp_file):
+            if not skips.is_stable(fastp_file):
                 continue
             with open(fastp_file, "r") as f:
                 payload = json.load(f)
@@ -187,7 +200,10 @@ def load_fastp_per_sample(main_dir: str) -> List[Dict[str, Any]]:
             logging.debug(f"load_fastp_per_sample skipping {fastp_file}: {exc}")
             continue
 
-    _store_mtime_cache(mtime_key, [fastp_dir], list(rows))
+    # A row skipped for instability returns once the window passes, which
+    # changes no mtime: the reduced list must not be cached (finding 10).
+    if not skips.skipped:
+        _store_mtime_cache(mtime_key, [fastp_dir], list(rows), fingerprint=fingerprint)
     return rows
 
 
@@ -211,9 +227,10 @@ def load_fastp_card_payloads(
         return []
 
     mtime_key = f"fastp_cards:{_get_cache_key(main_dir, sample)}"
-    cached = _check_mtime_cache(mtime_key, [fastp_dir])
-    if cached is not None:
+    state, cached, fingerprint = _mtime_cache_lookup(mtime_key, [fastp_dir])
+    if state == "hit":
         return list(cached)
+    skips = StabilitySkips()
 
     if sample is None or sample == "All Samples":
         files = sorted(glob.glob(os.path.join(fastp_dir, "*.fastp.json")))
@@ -224,7 +241,7 @@ def load_fastp_card_payloads(
     payloads: List[Dict[str, Any]] = []
     for fastp_file in files:
         try:
-            if not _is_file_stable(fastp_file):
+            if not skips.is_stable(fastp_file):
                 continue
             with open(fastp_file, "r") as f:
                 payload = json.load(f)
@@ -242,7 +259,8 @@ def load_fastp_card_payloads(
                 f"load_fastp_card_payloads skipping {fastp_file}: {exc}")
             continue
 
-    _store_mtime_cache(mtime_key, [fastp_dir], list(payloads))
+    if not skips.skipped:
+        _store_mtime_cache(mtime_key, [fastp_dir], list(payloads), fingerprint=fingerprint)
     return payloads
 
 
@@ -286,8 +304,8 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
     # Fast mtime-based check: skip parsing if fastp directory is unchanged
     fastp_cache_key = _get_cache_key(main_dir, sample)
     mtime_key = f"fastp:{fastp_cache_key}"
-    mtime_cached = _check_mtime_cache(mtime_key, [fastp_dir])
-    if mtime_cached is not None:
+    state, mtime_cached, fingerprint = _mtime_cache_lookup(mtime_key, [fastp_dir])
+    if state == "hit":
         logging.debug(f"Mtime cache hit for FASTP data: {fastp_cache_key}")
         return mtime_cached.copy() if isinstance(mtime_cached, dict) else mtime_cached
 
@@ -306,8 +324,14 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
             logging.warning(f"No FASTP files found for sample {sample}")
             return _empty_fastp_stats()
 
-    aggregated_stats = _aggregate_fastp_files(fastp_files)
-    _store_mtime_cache(mtime_key, [fastp_dir], aggregated_stats.copy())
+    skips = StabilitySkips()
+    aggregated_stats = _aggregate_fastp_files(fastp_files, skips)
+    # In batch mode the last fastp JSON written lands inside the stability
+    # window of the poll that first sees it; cached, the reduced total
+    # stayed until something else changed under fastp/ (finding 10).
+    if not skips.skipped:
+        _store_mtime_cache(mtime_key, [fastp_dir], aggregated_stats.copy(),
+                           fingerprint=fingerprint)
     return aggregated_stats
 
 
@@ -388,9 +412,10 @@ def load_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str
     # per sample per tick plus twice more for the quality estimate
     # (round-2 audit, 2026-08-22).
     mtime_key = f"nanoplot:{_get_cache_key(main_dir, sample)}"
+    fingerprint = None
     if os.path.exists(nanoplot_dir):
-        cached = _check_mtime_cache(mtime_key, [nanoplot_dir])
-        if cached is not None:
+        state, cached, fingerprint = _mtime_cache_lookup(mtime_key, [nanoplot_dir])
+        if state == "hit":
             return cached.copy() if isinstance(cached, dict) else cached
 
     nanostats_files = []
@@ -456,8 +481,14 @@ def load_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str
         aggregated['mean_read_quality'] = quality_weighted_sum / total_reads
     if file_count > 0:
         aggregated['source'] = 'nanoplot'
+    if file_count > 1:
+        # The N50 of pooled reads is not derivable from per-sample N50s;
+        # the largest of them (from any sample, however few reads it had)
+        # was reported as the run's N50.
+        aggregated['read_length_n50'] = None
 
-    _store_mtime_cache(mtime_key, [nanoplot_dir], dict(aggregated))
+    _store_mtime_cache(mtime_key, [nanoplot_dir], dict(aggregated),
+                       fingerprint=fingerprint)
     return aggregated
 
 
@@ -509,6 +540,71 @@ def _parse_nanostats_file(filepath: str) -> Dict[str, Any]:
         return _empty_nanoplot_stats()
 
 
+def summarize_seqkit_rows(seqkit_df: pd.DataFrame) -> Dict[str, Any]:
+    """Pool seqkit stats rows (one per sample or batch) into one summary.
+
+    Mean length is total bases over total reads. Mean quality, Q20/Q30 and
+    GC are per-base figures and are weighted by ``sum_len``, as nanometanf's
+    seqkit merge weights them. N50 and the median of pooled reads cannot be
+    derived from per-row values, so they are returned only for a single row
+    and are ``None`` otherwise: the largest or the mean of several N50s is
+    not an N50. Plain column means, which this replaces at four sites, let
+    a 10-read sample count as much as a 1,000-read one.
+    """
+    def col(name):
+        if name not in seqkit_df.columns:
+            return None
+        return pd.to_numeric(seqkit_df[name], errors="coerce").fillna(0)
+
+    num_seqs, sum_len = col("num_seqs"), col("sum_len")
+    total_reads = int(num_seqs.sum()) if num_seqs is not None else 0
+    total_bases = int(sum_len.sum()) if sum_len is not None else 0
+
+    def base_weighted(name):
+        values = col(name)
+        if values is None:
+            return None
+        if sum_len is not None and total_bases > 0:
+            return float((values * sum_len).sum() / total_bases)
+        return float(values.mean()) if len(values) else None
+
+    if total_reads > 0 and total_bases > 0:
+        mean_length = total_bases / total_reads
+    else:
+        avg = col("avg_len")
+        mean_length = float(avg.mean()) if avg is not None and len(avg) else 0.0
+
+    # A single row's N50 and median are its own, unless that row is a sum
+    # of batches: the GUI's batch aggregate leaves them None, and
+    # nanometanf's SEQKIT_MERGE_STATS row (<sample>.cumulative.fastq.gz)
+    # fills them from the mean, which is not a measurement.
+    single = len(seqkit_df) == 1
+    if single and "file" in seqkit_df.columns:
+        if ".cumulative." in str(seqkit_df["file"].iloc[0]):
+            single = False
+
+    def single_value(name, cast):
+        if not single or name not in seqkit_df.columns:
+            return None
+        value = pd.to_numeric(seqkit_df[name].iloc[0], errors="coerce")
+        return None if pd.isna(value) else cast(value)
+
+    min_len, max_len = col("min_len"), col("max_len")
+    return {
+        "total_reads": total_reads,
+        "total_bases": total_bases,
+        "mean_length": float(mean_length),
+        "mean_quality": base_weighted("AvgQual"),
+        "q20_percent": base_weighted("Q20(%)"),
+        "q30_percent": base_weighted("Q30(%)"),
+        "gc_percent": base_weighted("GC(%)"),
+        "n50": single_value("N50", int),
+        "median_length": single_value("Q2", float),
+        "min_length": int(min_len.min()) if min_len is not None and len(min_len) else 0,
+        "max_length": int(max_len.max()) if max_len is not None and len(max_len) else 0,
+    }
+
+
 def _load_seqkit_as_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str, Any]:
     """
     Load seqkit statistics and convert to NanoPlot-compatible format.
@@ -529,33 +625,26 @@ def _load_seqkit_as_nanoplot_stats(main_dir: str, sample: Optional[str] = None) 
         logging.debug("No seqkit data available for fallback")
         return _empty_nanoplot_stats()
 
-    # Aggregate seqkit stats
-    total_reads = int(seqkit_df['num_seqs'].sum()) if 'num_seqs' in seqkit_df.columns else 0
-    total_bases = int(seqkit_df['sum_len'].sum()) if 'sum_len' in seqkit_df.columns else 0
-    mean_length = float(seqkit_df['avg_len'].mean()) if 'avg_len' in seqkit_df.columns else 0.0
-    n50 = int(seqkit_df['N50'].max()) if 'N50' in seqkit_df.columns else 0
+    # Pooled, weighted summary; N50 and median are None for several rows.
+    summary = summarize_seqkit_rows(seqkit_df)
+    mean_quality = summary["mean_quality"] or 0.0
 
-    # Use AvgQual from seqkit as mean_read_quality (Phred scale)
-    mean_quality = float(seqkit_df['AvgQual'].mean()) if 'AvgQual' in seqkit_df.columns else 0.0
-
-    # Estimate median from Q2 (second quartile = median)
-    median_length = float(seqkit_df['Q2'].mean()) if 'Q2' in seqkit_df.columns else mean_length
-
-    logging.debug(f"Seqkit fallback: {total_reads} reads, {total_bases} bases, Q={mean_quality:.1f}")
+    logging.debug(f"Seqkit fallback: {summary['total_reads']} reads, "
+                  f"{summary['total_bases']} bases, Q={mean_quality:.1f}")
 
     return {
-        'mean_read_length': mean_length,
+        'mean_read_length': summary["mean_length"],
         'mean_read_quality': mean_quality,
-        'median_read_length': median_length,
+        'median_read_length': summary["median_length"],
         'median_read_quality': mean_quality,  # Seqkit doesn't provide median quality
-        'number_of_reads': total_reads,
-        'read_length_n50': n50,
-        'total_bases': total_bases,
+        'number_of_reads': summary["total_reads"],
+        'read_length_n50': summary["n50"],
+        'total_bases': summary["total_bases"],
         'source': 'seqkit',
         # Additional seqkit-specific metrics
-        'q20_percent': float(seqkit_df['Q20(%)'].mean()) if 'Q20(%)' in seqkit_df.columns else 0.0,
-        'q30_percent': float(seqkit_df['Q30(%)'].mean()) if 'Q30(%)' in seqkit_df.columns else 0.0,
-        'gc_percent': float(seqkit_df['GC(%)'].mean()) if 'GC(%)' in seqkit_df.columns else 0.0
+        'q20_percent': summary["q20_percent"] or 0.0,
+        'q30_percent': summary["q30_percent"] or 0.0,
+        'gc_percent': summary["gc_percent"] or 0.0,
     }
 
 
@@ -675,17 +764,24 @@ def load_seqkit_stats(main_dir: str, sample: Optional[str] = None) -> pd.DataFra
 
     mtime_key = f"seqkit:{_get_cache_key(main_dir, sample)}"
     fingerprint_paths = _seqkit_fingerprint_paths(seqkit_dir, sample)
-    state, cached = _mtime_cache_state(mtime_key, fingerprint_paths)
+    state, cached, fingerprint = _mtime_cache_lookup(mtime_key, fingerprint_paths)
     if state == "hit":
         return cached
 
-    result = _load_seqkit_stats_uncached(main_dir, seqkit_dir, sample)
-    _store_mtime_cache(mtime_key, fingerprint_paths, result)
+    skips = StabilitySkips()
+    result = _load_seqkit_stats_uncached(main_dir, seqkit_dir, sample, skips)
+    # A batch TSV skipped inside its stability window is summed once the
+    # window passes, which changes no mtime: a total built without it must
+    # not enter the mtime cache (finding 10).
+    if not skips.skipped:
+        _store_mtime_cache(mtime_key, fingerprint_paths, result,
+                           fingerprint=fingerprint)
     return result
 
 
 def _load_seqkit_stats_uncached(
-    main_dir: str, seqkit_dir: str, sample: Optional[str]
+    main_dir: str, seqkit_dir: str, sample: Optional[str],
+    skips: Optional[StabilitySkips] = None,
 ) -> pd.DataFrame:
     """Read and aggregate seqkit TSVs, bypassing the mtime cache."""
     incremental = _is_incremental_seqkit_layout(seqkit_dir, sample)
@@ -698,7 +794,7 @@ def _load_seqkit_stats_uncached(
         tsv_files = _find_sample_files(seqkit_dir, sample, ["tsv"])
 
     if incremental:
-        incremental_df = _load_seqkit_incremental(seqkit_dir, sample)
+        incremental_df = _load_seqkit_incremental(seqkit_dir, sample, skips)
         if not incremental_df.empty:
             if tsv_files:
                 # A flat TSV exists for some samples but not the incremental
@@ -742,7 +838,8 @@ def _read_seqkit_tsvs(tsv_files: List[str]) -> pd.DataFrame:
 
 
 def _load_seqkit_incremental(
-    seqkit_dir: str, sample: Optional[str] = None
+    seqkit_dir: str, sample: Optional[str] = None,
+    skips: Optional[StabilitySkips] = None,
 ) -> pd.DataFrame:
     """
     Aggregate per-batch seqkit TSVs into a single cumulative row per sample.
@@ -757,9 +854,11 @@ def _load_seqkit_incremental(
     * ``avg_len`` is recomputed as ``sum_len / num_seqs``.
     * ``Q20(%)``, ``Q30(%)``, ``AvgQual`` and ``GC(%)`` are recomputed as
       per-base weighted averages (weighted by ``sum_len``).
-    * ``Q1``, ``Q2``, ``Q3``, ``N50`` and ``N50_num`` are approximated
-      from the cumulative average length, since the raw read-length
-      distribution is not preserved in cumulative stats.
+    * ``Q1``, ``Q2``, ``Q3``, ``N50`` and ``N50_num`` are taken from the
+      batch when only one contributed reads and are otherwise None: the
+      read-length distribution is not preserved in summed stats. (The
+      upstream module approximates them from the mean; the GUI treats its
+      merged row as unknown too, see summarize_seqkit_rows.)
 
     Args:
         seqkit_dir: Path to the ``seqkit/`` output directory.
@@ -809,8 +908,14 @@ def _load_seqkit_incremental(
         per_batch: List[pd.DataFrame] = []
         for batch_file in batch_files:
             df = load_batch_frame(batch_file)
-            if df is not None:
-                per_batch.append(df)
+            if df is None:
+                # The cache returns None for an unstable file and for a
+                # corrupt one alike; only the former heals without a
+                # rewrite, so only it marks the result transient.
+                if skips is not None:
+                    skips.is_stable(batch_file)
+                continue
+            per_batch.append(df)
 
         if not per_batch:
             continue
@@ -839,6 +944,7 @@ def _aggregate_seqkit_batches(
     total_sum_gap = 0
     total_sum_n = 0
     contributing_min_lens: List[int] = []
+    contributing_rows: List[Any] = []
     max_len = 0
     weighted_q20 = 0.0
     weighted_q30 = 0.0
@@ -881,6 +987,7 @@ def _aggregate_seqkit_batches(
         if num_seqs > 0:
             contributing_min_lens.append(this_min)
             max_len = max(max_len, this_max)
+            contributing_rows.append(row)
 
         weighted_q20 += _safe_float(row.get('Q20(%)', 0)) * sum_len
         weighted_q30 += _safe_float(row.get('Q30(%)', 0)) * sum_len
@@ -905,6 +1012,20 @@ def _aggregate_seqkit_batches(
 
     min_len = min(contributing_min_lens) if contributing_min_lens else 0
 
+    # Quartiles and N50 describe a read-length distribution that summed
+    # batch stats do not preserve. One contributing batch keeps its own
+    # measured values; several leave them unknown (None). They used to be
+    # filled from the mean (N50 = avg_len, Q1/Q3 = 0.75x / 1.5x avg_len) and
+    # were displayed as measurements.
+    distribution = {key: None for key in ("Q1", "Q2", "Q3", "N50", "N50_num")}
+    if len(contributing_rows) == 1:
+        only = contributing_rows[0]
+        for key in distribution:
+            value = pd.to_numeric(only.get(key), errors="coerce")
+            distribution[key] = None if pd.isna(value) else value
+        if distribution["N50"] is not None:
+            distribution["N50"] = int(distribution["N50"])
+
     return {
         'file': file_label,
         'format': fmt_label,
@@ -914,12 +1035,12 @@ def _aggregate_seqkit_batches(
         'min_len': min_len,
         'avg_len': round(avg_len, 1),
         'max_len': max_len,
-        'Q1': round(avg_len * 0.75, 1),
-        'Q2': round(avg_len, 1),
-        'Q3': round(avg_len * 1.5, 1),
+        'Q1': distribution["Q1"],
+        'Q2': distribution["Q2"],
+        'Q3': distribution["Q3"],
         'sum_gap': total_sum_gap,
-        'N50': int(avg_len),
-        'N50_num': total_num_seqs // 2,
+        'N50': distribution["N50"],
+        'N50_num': distribution["N50_num"],
         'Q20(%)': round(final_q20, 2),
         'Q30(%)': round(final_q30, 2),
         'AvgQual': round(final_avgqual, 2),
@@ -1029,10 +1150,9 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
             total_reads = reads_after
             total_bases = bases_after
             pass_rate = round((reads_after / reads_before * 100), 1) if reads_before > 0 else 0
-            # Estimate mean quality from q30 rate
-            q30_rate = fastp_stats.get('q30_rate_after', 0)
-            if q30_rate > 0:
-                mean_quality = round(10 + 25 * q30_rate, 1)
+            # fastp reports no mean read quality. The cell used to show
+            # 10 + 25 * q30_rate, a formula labelled as a measurement; it
+            # stays blank for a fastp run (live test 2026-11-24).
         else:
             # Fall back to NanoPlot stats (used when chopper is the QC tool)
             nanoplot_stats = load_nanoplot_stats(main_dir, sample)
@@ -1052,7 +1172,7 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
                 total_reads = nanoplot_stats['number_of_reads']
                 total_bases = nanoplot_stats.get('total_bases', 0)
                 mean_quality = nanoplot_stats.get('mean_read_quality', 0)
-                n50 = nanoplot_stats.get('read_length_n50', 0)
+                n50 = nanoplot_stats.get('read_length_n50') or 0
 
         # --- Cumulative horizon (matches Stage Strip / Dashboard / Organism) ---
         cumul_df = load_kraken_data(main_dir, sample)
@@ -1121,7 +1241,9 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
             'sample': sample,
             'base_pairs': total_bases,
             'pass_rate': pass_rate_display,
-            'mean_quality': round(mean_quality, 1) if mean_quality > 0 else "N/A",
+            # None, not "N/A": the grid types the column as numeric and
+            # rendered the string as "Invalid Number".
+            'mean_quality': round(mean_quality, 1) if mean_quality > 0 else None,
             'n50': n50 if n50 > 0 else "N/A",
             'status': status,
 
@@ -1207,27 +1329,18 @@ def get_qc_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str, Any]:
     # Try seqkit (used with chopper)
     seqkit_df = load_seqkit_stats(main_dir, sample)
     if not seqkit_df.empty:
-        total_reads = seqkit_df['num_seqs'].sum() if 'num_seqs' in seqkit_df.columns else 0
-        total_bases = seqkit_df['sum_len'].sum() if 'sum_len' in seqkit_df.columns else 0
-        avg_len = seqkit_df['avg_len'].mean() if 'avg_len' in seqkit_df.columns else 0
-
-        # Extract Q20% and Q30% from seqkit stats (very useful quality metrics)
-        q20_pct = seqkit_df['Q20(%)'].mean() if 'Q20(%)' in seqkit_df.columns else 0
-        q30_pct = seqkit_df['Q30(%)'].mean() if 'Q30(%)' in seqkit_df.columns else 0
-        avg_qual = seqkit_df['AvgQual'].mean() if 'AvgQual' in seqkit_df.columns else 0
-        n50 = seqkit_df['N50'].mean() if 'N50' in seqkit_df.columns else 0
-
+        summary = summarize_seqkit_rows(seqkit_df)
         return {
             'source': 'seqkit',
-            'total_reads': int(total_reads),
-            'total_bases': int(total_bases),
-            'avg_read_length': float(avg_len),
-            'min_read_length': int(seqkit_df['min_len'].min()) if 'min_len' in seqkit_df.columns else 0,
-            'max_read_length': int(seqkit_df['max_len'].max()) if 'max_len' in seqkit_df.columns else 0,
-            'q20_percent': float(q20_pct),
-            'q30_percent': float(q30_pct),
-            'avg_quality': float(avg_qual),
-            'n50': int(n50)
+            'total_reads': summary["total_reads"],
+            'total_bases': summary["total_bases"],
+            'avg_read_length': summary["mean_length"],
+            'min_read_length': summary["min_length"],
+            'max_read_length': summary["max_length"],
+            'q20_percent': summary["q20_percent"] or 0.0,
+            'q30_percent': summary["q30_percent"] or 0.0,
+            'avg_quality': summary["mean_quality"] or 0.0,
+            'n50': summary["n50"],
         }
 
     # Try nanoplot

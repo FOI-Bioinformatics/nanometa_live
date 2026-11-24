@@ -823,3 +823,98 @@ class TestUnstableBlastTsvIsSkipped:
         p = ValidationParser(str(tmp_path))
         results = p.get_validation_results()
         assert [r for r in results if r.validation_method == "blast"]
+
+
+class TestUnstableSkipIsNotCached:
+    """A skip inside the stability window must not freeze the result cache.
+
+    Audit 2026-11-06, finding 10: the parser cached the result list under a
+    directory fingerprint that already included the skipped file's mtime.
+    The file then aged past the window -- which changes no mtime -- and
+    every later read answered from the cache without it, so a BLAST pair
+    caught mid-rewrite in a real-time run disappeared until another file
+    changed. The kraken loaders mark such a poll transient; the parser now
+    does the same (``StabilitySkips``).
+    """
+
+    def _pair(self, tmp_path, sample, age_seconds):
+        vdir = tmp_path / "validation" / "blast"
+        vdir.mkdir(parents=True, exist_ok=True)
+        f = vdir / f"{sample}_taxid562.blast.tsv"
+        _write_blast(f, ROWS_12)
+        t = time.time() - age_seconds
+        os.utime(f, (t, t))
+
+    @staticmethod
+    def _let_window_pass(monkeypatch, seconds=5.0):
+        # Advance the clock the stability check reads; no mtime changes,
+        # exactly as on a live run.
+        from nanometa_live.core.utils import loader_utils
+        real = time.time
+        monkeypatch.setattr(loader_utils.time, "time", lambda: real() + seconds)
+
+    def test_skipped_pair_appears_once_stable(self, tmp_path, monkeypatch):
+        self._pair(tmp_path, "barcode01", age_seconds=120)
+        self._pair(tmp_path, "barcode02", age_seconds=0)   # just landed
+        p = ValidationParser(str(tmp_path))
+        first = sorted(r.sample_id for r in p.get_validation_results())
+        assert first == ["barcode01"], "precondition: the young file is skipped"
+
+        self._let_window_pass(monkeypatch)
+        second = sorted(r.sample_id for r in p.get_validation_results())
+        assert second == ["barcode01", "barcode02"], (
+            "the reduced result was cached under a fingerprint that already "
+            "included the skipped file, so the pair never appeared"
+        )
+
+    def test_settled_tree_is_still_cached(self, tmp_path):
+        self._pair(tmp_path, "barcode01", age_seconds=120)
+        self._pair(tmp_path, "barcode02", age_seconds=120)
+        p = ValidationParser(str(tmp_path))
+        p.get_validation_results()
+        assert p._results_cache is not None, "a result with no skip must be cached"
+
+
+class TestLayoutIsReprobedPerRead:
+    """The parser must not pin the validation layout at construction.
+
+    Audit 2026-11-06, finding 7: with ``validation_method: both`` minimap2
+    finishes first, so the shared parser was built while only
+    ``validation/minimap2/`` existed and pinned ``validation/``. Every later
+    ``blast.tsv`` landed in ``validation/blast/``, which its glob never
+    looked at, and the BLAST sub-tab stayed empty for the process lifetime
+    while a fresh parser found the result (``audit_loaders/t_valdir.py``).
+    """
+
+    def test_singleton_sees_blast_dir_that_appears_later(self, tmp_path):
+        from nanometa_live.core.parsers.blast_validation_parser import (
+            get_validation_parser, reset_validation_parsers,
+        )
+        reset_validation_parsers()
+        (tmp_path / "validation" / "minimap2").mkdir(parents=True)
+        p = get_validation_parser(str(tmp_path))
+        assert p.validation_dir == tmp_path / "validation", "precondition"
+        assert p.get_validation_results() == []
+
+        blast = tmp_path / "validation" / "blast"
+        blast.mkdir()
+        _write_blast(blast / "barcode01_taxid562.blast.tsv", ROWS_12)
+        p2 = get_validation_parser(str(tmp_path))
+        assert p2 is p, "the singleton is reused, so it must re-probe itself"
+        got = [(r.sample_id, r.taxid, r.validation_method)
+               for r in p2.get_validation_results()]
+        assert got == [("barcode01", 562, "blast")]
+        assert p2.validation_dir == blast
+        reset_validation_parsers()
+
+    def test_validation_blast_is_globbed_even_when_a_legacy_dir_wins(self, tmp_path):
+        # A legacy top-level blast_validation/ resolves first; nanometanf's
+        # own publish location must still be scanned.
+        (tmp_path / "blast_validation").mkdir()
+        blast = tmp_path / "validation" / "blast"
+        blast.mkdir(parents=True)
+        _write_blast(blast / "barcode01_taxid562.blast.tsv", ROWS_12)
+        p = ValidationParser(str(tmp_path))
+        assert p.validation_dir == tmp_path / "blast_validation"
+        got = [(r.sample_id, r.taxid) for r in p.get_validation_results()]
+        assert got == [("barcode01", 562)]

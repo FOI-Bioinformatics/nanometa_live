@@ -61,6 +61,15 @@ class TestFormatTimeElapsed:
         start = (_dt.datetime.now() - _dt.timedelta(hours=1, minutes=2, seconds=3)).isoformat()
         assert _format_time_elapsed(start) == "01:02:03"
 
+    def test_a_finished_run_stops_the_clock(self):
+        """Elapsed time ends at the run's end, not at the current time.
+
+        A re-render after the run (a watchlist toggle, a fingerprint change)
+        showed wall-clock time since Start, so the duration kept growing."""
+        start = _dt.datetime(2026, 9, 1, 10, 0, 0).isoformat()
+        ended = _dt.datetime(2026, 9, 1, 10, 42, 7).isoformat()
+        assert _format_time_elapsed(start, ended) == "00:42:07"
+
 
 class TestAlertStates:
     def test_idle_alerts(self):

@@ -124,6 +124,15 @@ def _get_parse_lock(cache_key: str) -> threading.Lock:
         return lock
 
 
+def _stability_window_seconds(wait_ms: int = FILE_STABILITY_CHECK_INTERVAL_MS) -> float:
+    """Age below which a file counts as possibly mid-write (see below).
+
+    Shared by ``_is_file_stable`` and ``check_data_freshness`` so the
+    fingerprint's settling marker covers exactly the files the loaders skip.
+    """
+    return max(wait_ms / 1000.0, 1.0)
+
+
 def _is_file_stable(filepath: str, wait_ms: int = FILE_STABILITY_CHECK_INTERVAL_MS) -> bool:
     """
     Check if a file is stable (not currently being written to).
@@ -155,7 +164,7 @@ def _is_file_stable(filepath: str, wait_ms: int = FILE_STABILITY_CHECK_INTERVAL_
 
         # File is stable if its mtime is older than the threshold
         age_seconds = time.time() - stat_result.st_mtime
-        threshold_seconds = max(wait_ms / 1000.0, 1.0)
+        threshold_seconds = _stability_window_seconds(wait_ms)
 
         if age_seconds < threshold_seconds:
             logging.debug(f"File modified {age_seconds:.2f}s ago, may still be written: {filepath}")
@@ -296,6 +305,11 @@ def clear_all_loader_caches():
     from nanometa_live.app.utils.batch_progress import clear_batch_progress_memo
 
     clear_batch_progress_memo()
+    # Same reason: the freshness map is keyed on the results fingerprint,
+    # which a new run into the same directory can repeat while empty.
+    from nanometa_live.app.utils.freshness import clear_freshness_memo
+
+    clear_freshness_memo()
     # Parser singletons carry per-run result caches; a run switch must not
     # let the previous run's validation answer the new one's first tick.
     reset_validation_parsers()
@@ -506,19 +520,81 @@ def _mtime_cache_state(
     return ("stale", None)
 
 
+def _mtime_cache_lookup(
+    cache_key: str,
+    paths: List[str],
+) -> Tuple[str, Any, Optional[Tuple[float, int, int]]]:
+    """``_mtime_cache_state`` plus the fingerprint that decided a miss.
+
+    The third element is the fingerprint of ``paths`` taken at lookup time,
+    or ``None`` on an epoch hit (no filesystem call was made). A caller that
+    goes on to parse must store under THIS fingerprint, never one taken after
+    the parse: ``_store_mtime_cache`` used to fingerprint at store time, so a
+    report rewritten between parse and store was cached under the NEW
+    fingerprint and served as ``hit`` until the file changed again --
+    permanently when it was the run's final rewrite (audit 2026-11-06,
+    finding 11). Taking the fingerprint here costs nothing extra: the store
+    no longer walks the paths.
+    """
+    with _cache_lock:
+        entry = _file_mtimes.get(cache_key)
+        epoch = _freshness_epoch
+    if entry is not None:
+        stored_fp, stored_epoch, cached_result = entry
+        if epoch and stored_epoch == epoch:
+            return ("hit", cached_result, None)
+    current_fp = _get_path_fingerprint(paths)
+    if entry is not None and current_fp == stored_fp:
+        with _cache_lock:
+            _file_mtimes[cache_key] = (stored_fp, epoch, cached_result)
+        return ("hit", cached_result, current_fp)
+    return ("absent" if entry is None else "stale", None, current_fp)
+
+
 def _store_mtime_cache(
     cache_key: str,
     paths: List[str],
     result: Any,
+    fingerprint: Optional[Tuple[float, int, int]] = None,
 ) -> None:
     """Store a result keyed by the (mtime, size, count) fingerprint of paths.
 
     The current freshness epoch is recorded alongside so that repeat lookups
     within the same poll can skip the fingerprint walk entirely.
+
+    ``fingerprint`` is the value ``_mtime_cache_lookup`` returned BEFORE the
+    caller parsed; pass it whenever the lookup computed one. Fingerprinting
+    here, after the parse, is the window finding 11 describes.
     """
-    fp = _get_path_fingerprint(paths)
+    fp = fingerprint if fingerprint is not None else _get_path_fingerprint(paths)
     with _cache_lock:
         _file_mtimes[cache_key] = (fp, _freshness_epoch, result)
+
+
+class StabilitySkips:
+    """Records whether a loader skipped a file inside its stability window.
+
+    A skip heals by time passing, which changes no mtime and therefore no
+    fingerprint, so a result built with one is transient and must not enter
+    the mtime cache -- the ``transient_skip`` rule the Kraken2 loaders follow
+    (round-4 audit, H6). Shared here so the validation, fastp and seqkit
+    loaders apply the same rule: each used to store the reduced result under
+    a fingerprint that already included the skipped file, which then stayed
+    out of the totals until something else changed under the directory
+    (audit 2026-11-06, finding 10).
+    """
+
+    __slots__ = ("skipped",)
+
+    def __init__(self) -> None:
+        self.skipped = False
+
+    def is_stable(self, filepath: str) -> bool:
+        """``_is_file_stable``, remembering a False answer."""
+        if _is_file_stable(filepath):
+            return True
+        self.skipped = True
+        return False
 
 
 def check_data_freshness(main_dir: str) -> str:
@@ -551,11 +627,29 @@ def check_data_freshness(main_dir: str) -> str:
     # outdirs, or one emptied by Archive) would otherwise fail to bump the
     # epoch on a switch -- and every mtime-cache entry stamped with the
     # current epoch keeps answering without a filesystem check.
+    #
+    # A subdirectory whose newest file is still inside the loaders' stability
+    # window carries a ":settling" marker. The loaders skip such a file, so a
+    # poll landing in the window renders without it; the file then settles by
+    # time passing, which changes no mtime. Without the marker the
+    # fingerprint stayed put and every rendered-fingerprint memo judged later
+    # refreshes redundant, leaving panels on the previous batch until the next
+    # file arrived (never, for the last file of a run). The marker's removal
+    # is the change that re-renders them. Only the newest file needs checking:
+    # every other file is older. A saturated walk reports a time bucket rather
+    # than a file mtime, so it is never marked.
+    now = time.time()
+    window = _stability_window_seconds()
     parts = [main_dir]
     for subdir in RESULTS_WATCHED_SUBDIRS:
         dirpath = os.path.join(main_dir, subdir)
         mt, n_files = _get_dir_latest_mtime(dirpath)
-        parts.append(f"{subdir}:{mt}:{n_files}")
+        settling = (
+            mt > 0
+            and n_files <= _MAX_FINGERPRINT_FILES
+            and now - mt < window
+        )
+        parts.append(f"{subdir}:{mt}:{n_files}{':settling' if settling else ''}")
 
     raw = "|".join(parts)
     fingerprint = hashlib.md5(raw.encode()).hexdigest()

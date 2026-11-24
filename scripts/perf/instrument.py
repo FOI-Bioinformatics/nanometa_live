@@ -162,6 +162,7 @@ def reset_caches() -> None:
 
     with sd._sample_cache_lock:
         sd._sample_cache.clear()
+        sd._file_mapping_cache.clear()
 
     # Optional caches -- present in some versions of the loader stack.
     for module, name in ((lu, "_poll_fingerprint_cache"),
@@ -194,8 +195,11 @@ def reset_caches() -> None:
 
     from nanometa_live.app.utils.batch_progress import clear_batch_progress_memo
 
+    from nanometa_live.app.utils.freshness import clear_freshness_memo
+
     bvp.reset_validation_parsers()
     clear_batch_progress_memo()
+    clear_freshness_memo()
     staleness.clear()
     sbc.clear_seqkit_batch_cache()
     racc.clear_sample_accum_cache()

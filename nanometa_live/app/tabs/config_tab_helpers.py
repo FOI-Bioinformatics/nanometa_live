@@ -565,6 +565,14 @@ def config_form_dirty(snapshot, *, form):
     if not snapshot:
         return False
 
+    # A key the saved config does not carry is shown in the form at its
+    # default_config() fallback (the form loader's rule), so that is what it
+    # must be compared with. Comparing with None flagged a freshly loaded,
+    # unedited form as Modified whenever the config was sparse -- every
+    # visualization-mode session.
+    from nanometa_live.core.config.config_loader import default_config
+    defaults = default_config()
+
     bool_keys = {
         "kraken_memory_mapping", "blast_validation",
         "skip_nanoplot", "kraken2_enable_incremental", "batch_chunking",
@@ -573,7 +581,7 @@ def config_form_dirty(snapshot, *, form):
         "assembly_allow_low_depth",
     }
     for key, current_val in form.items():
-        snapshot_val = snapshot.get(key)
+        snapshot_val = snapshot[key] if key in snapshot else defaults.get(key)
         if key == "kraken_memory_mapping" and key not in snapshot:
             # Deliberately absent from create_default_config (the resolver's
             # "explicit override wins" rule); the resolver treats absent as
@@ -728,3 +736,21 @@ def pin_running_run_paths(config, current_config, backend_status) -> bool:
             config[key] = live
     return True
 
+
+
+#: Keys that describe the session rather than the analysis: where it keeps
+#: its state, whether it may use the network, how it was launched. Reset
+#: restores analysis settings and keeps these.
+SESSION_IDENTITY_KEYS = (
+    "data_dir", "project_dir", "nanometa_home", "genome_cache_dir",
+    "offline_mode", "gui_port", "visualization_only", "main_dir",
+)
+
+
+def reset_preserving_session(defaults, current):
+    """``defaults`` with the session-identity keys carried over from ``current``."""
+    out = dict(defaults or {})
+    for key in SESSION_IDENTITY_KEYS:
+        if current and key in current:
+            out[key] = current[key]
+    return out

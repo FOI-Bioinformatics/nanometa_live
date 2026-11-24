@@ -18,6 +18,7 @@ from nanometa_live.core.utils.sample_detector import get_available_samples, get_
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.tabs.config_tab_helpers import RUNNING_RUN_PATH_KEYS
 from nanometa_live.app.utils.debounce import (
     should_skip_update, get_trigger_type,
     interval_render_is_redundant, mark_rendered,
@@ -110,19 +111,58 @@ def register_startup(app, backend_manager):
         tab's collision Continue then launched with an empty outdir and the
         negative control declared twenty minutes earlier was gone (H34/H33).
         While a run exists in this app process, its config is the truth for
-        every tab; before any run the boot config stands (boot is fresh by
-        design). Runs on the first interval tick or tab click after load
-        (an allow_duplicate output cannot fire on the initial call); a dict
-        compare per tick, no I/O, and no_update when nothing differs.
+        a tab that has not yet received it; before any run the boot config
+        stands (boot is fresh by design). Runs on the first interval tick or
+        tab click after load (an allow_duplicate output cannot fire on the
+        initial call); a dict compare per tick, no I/O, and no_update when
+        nothing differs.
+
+        The live config is the config the pipeline was LAUNCHED with
+        (``backend_manager.config`` is assigned at Start and never by
+        Apply), so it is copied wholesale only into a tab whose own results
+        dir (resolved as the fingerprint resolves it) is not the run's. A
+        tab whose dir is the run's has been hydrated, and every later
+        difference is an Apply made in it:
+        overlaying the whole live config there reverted a mid-run Apply of
+        ``negative_control_samples``, ``min_reads_for_validation`` or
+        ``update_interval_seconds`` within one poll, while the toast had
+        just promised they take effect now (bug audit 2026-11-06, finding
+        13). Such a tab gets only ``RUNNING_RUN_PATH_KEYS`` overlaid, the
+        same keys ``pin_running_run_paths`` holds on Apply, so the run's
+        folders still cannot drift. Updating the backend's config on Apply
+        instead was rejected: ``backend_manager.config`` records what the
+        pipeline is running with (the collision modal's settings diff and
+        the layout-mismatch poll read it), and an Apply must not rewrite
+        that.
         """
         live = getattr(backend_manager, "config", None)
-        started = bool((getattr(backend_manager, "status", None) or {}).get("start_time"))
+        status = getattr(backend_manager, "status", None) or {}
+        started = bool(status.get("start_time"))
         if not live or not started or not isinstance(live, dict):
             return no_update
-        if config and all(config.get(k) == v for k, v in live.items()):
+        # Hydration owns the run's folders only while the run is RUNNING.
+        # ``backend_manager.config`` is the launched config and persists after
+        # the run ends, so a per-tick wholesale overlay kept reverting a
+        # POST-run Apply that moved the results folder for the next run: the
+        # tab's new folder differs from the finished run's, so it read as a
+        # fresh tab and was overwritten every tick (bug audit 2026-11-06,
+        # extension of finding 13). Once the run is no longer active the
+        # operator may reconfigure freely; a fresh tab opened afterwards is
+        # adopted by ``reseed_config_after_refresh`` (which fires for a
+        # completed/errored/stopped run too), not here.
+        if not status.get("running"):
             return no_update
-        merged = dict(config or {})
-        merged.update(live)
+        config = config or {}
+        live_dir = resolve_outdir_for_fingerprint(live)
+        hydrated = bool(live_dir) and resolve_outdir_for_fingerprint(config) == live_dir
+        if hydrated:
+            overlay = {k: live[k] for k in RUNNING_RUN_PATH_KEYS if live.get(k)}
+        else:
+            overlay = live
+        if all(config.get(k) == v for k, v in overlay.items()):
+            return no_update
+        merged = dict(config)
+        merged.update(overlay)
         return merged
 
     @app.callback(
@@ -184,6 +224,51 @@ def register_startup(app, backend_manager):
                 "exist on this machine. Review them in the Configuration "
                 "tab before launching:\n" + "\n".join(lines)
             ),
+        }
+
+    _orphan_check_lock = threading.Lock()
+    _orphan_checked = {"done": False}
+
+    @app.callback(
+        Output("toast-message", "data", allow_duplicate=True),
+        # The resolved results folder, not app-config: a second callback
+        # with the same Output AND the same Input as
+        # warn_about_missing_paths_on_startup shares its callback_map key
+        # and silently replaces it.
+        Input("results-dir-path", "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def warn_about_orphan_run_on_startup(results_dir):
+        """Name a pipeline from an earlier session that is still running.
+
+        Nextflow is started in its own session and survives a GUI crash,
+        so a run can be writing the results folder with no dashboard
+        attached to it. The lock file records the pipeline's PID once it
+        is known (BackendManager._record_nextflow_pid); on boot this reads
+        that lock for the resolved results folder and says so once, with
+        the PID, so the operator neither waits for a verdict this session
+        will never compute nor starts a second run into the same folder
+        (which _acquire_lock now refuses anyway). Field audit 2026-10-28,
+        H3. Attaching to the orphan is not offered: the manager cannot
+        adopt a subprocess handle it did not create.
+        """
+        if not results_dir:
+            return no_update
+        with _orphan_check_lock:
+            if _orphan_checked["done"]:
+                return no_update
+            _orphan_checked["done"] = True
+        try:
+            from nanometa_live.core.workflow.backend_manager import BackendManager
+            orphan = BackendManager.read_orphan_run(str(results_dir))
+        except Exception:
+            return no_update
+        if not orphan:
+            return no_update
+        return {
+            "type": "warning",
+            "title": "A pipeline from an earlier session is still running",
+            "message": BackendManager._orphan_message(orphan),
         }
 
     @app.callback(

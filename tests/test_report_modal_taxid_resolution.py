@@ -117,6 +117,26 @@ class TestReadsLookup:
             "a six-figure read count (Bioshield field report, 2026-08-19)"
         )
 
+    def test_reads_held_by_subspecies_are_counted(self, tmp_path):
+        """A species whose reads all sit in its subspecies has direct reads
+        0; the modal said "0 sequences detected" beside "10,000 reads in 2
+        samples" (live test 2026-11-24). The count is cumulative."""
+        kraken = tmp_path / "kraken2"
+        kraken.mkdir()
+        report = kraken / "barcode01.kraken2.report.txt"
+        report.write_text(
+            " 0.00\t0\t0\tU\t0\tunclassified\n"
+            "100.00\t10000\t0\tR\t1\troot\n"
+            "100.00\t10000\t0\tS\t263\t  Francisella tularensis\n"
+            " 60.00\t6000\t6000\tS1\t119857\t    F. tularensis holarctica\n"
+            " 40.00\t4000\t4000\tS1\t177416\t    F. tularensis tularensis\n")
+        import os
+        old = time.time() - 60
+        os.utime(report, (old, old))
+        out = _lookup_organism_reads([263], {
+            "results_output_directory": str(tmp_path)}, None)
+        assert out["reads_int"] == 10000
+
     def test_no_match_stays_na(self, results_dir):
         out = _lookup_organism_reads([999999], {
             "results_output_directory": str(results_dir)}, None)

@@ -50,3 +50,41 @@ def species_rank_mask(df):
     ``in {"S","S1","S2"}``, and a normalisation table that was never called.
     """
     return df["rank"].map(is_species_rank)
+
+
+def count_organisms_found(kraken_df) -> int:
+    """The Organisms tab's "Organisms Found": species with reads, plus genera
+    whose reads resolve no further than the genus.
+
+    Counts cumulative reads, so a species whose reads all sit in its
+    subspecies is found (the direct ``reads`` column is 0 there), and a genus
+    is counted only when none of its species carries reads -- otherwise a
+    genus with a few unresolved reads was a second organism beside its own
+    species. Species are linked to their genus through ``parent_taxid``;
+    without that column every genus with reads is counted as before.
+    """
+    if kraken_df is None or kraken_df.empty:
+        return 0
+    col = "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
+    ranks = kraken_df["rank"].astype(str).str.strip()
+    reads = kraken_df[col].fillna(0).astype(int)
+    taxids = kraken_df["taxid"].fillna(0).astype(int)
+    present = (reads > 0) & (taxids > 1)
+
+    species = taxids[present & (ranks == "S")].tolist()
+    genera = set(taxids[present & (ranks == "G")].tolist())
+
+    if "parent_taxid" in kraken_df.columns:
+        parent = dict(zip(taxids.tolist(),
+                          kraken_df["parent_taxid"].fillna(0).astype(int).tolist()))
+        rank_of = dict(zip(taxids.tolist(), ranks.tolist()))
+        covered = set()
+        for tid in species:
+            node, hops = parent.get(tid), 0
+            while node and node not in covered and hops < 50:
+                if rank_of.get(node) == "G":
+                    covered.add(node)
+                    break
+                node, hops = parent.get(node), hops + 1
+        genera -= covered
+    return len(species) + len(genera)

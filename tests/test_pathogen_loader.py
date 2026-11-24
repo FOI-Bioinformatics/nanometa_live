@@ -97,7 +97,10 @@ class TestDictToPathogenEntry:
     def test_defaults_applied(self):
         entry = _dict_to_pathogen_entry({"taxid": 1, "name": "X"})
         assert entry.threat_level == ThreatLevel.MODERATE  # default
-        assert entry.alert_threshold == 10
+        # Unstated threshold follows the threat level (moderate -> 50), the
+        # same table WatchlistEntry.from_dict uses; a flat 10 here made the
+        # two load paths disagree about one YAML entry.
+        assert entry.alert_threshold == 50
 
     def test_to_dict_round_trips_enum_values(self):
         entry = PathogenEntry(taxid=1, name="X", threat_level=ThreatLevel.HIGH, bsl=BiosaftyLevel.BSL3)

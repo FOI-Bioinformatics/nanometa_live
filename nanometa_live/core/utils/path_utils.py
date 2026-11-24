@@ -149,6 +149,13 @@ def report_missing_paths(
             or lowered.startswith("http://")
             or lowered.startswith("https://")
             or lowered.startswith("git@")
+            # Bundle-relative sentinels normalise_path deliberately preserves
+            # (./pipeline_source, ./nextflow_plugins); they are resolved at
+            # bundle-import time and are not a filesystem path to probe here,
+            # so checking them against cwd raises a spurious "missing path"
+            # toast (bug audit 2026-11-08, finding 6).
+            or value.startswith("./")
+            or value.startswith("../")
         ):
             continue
         # "local:<path>" does name a filesystem location, so it is worth

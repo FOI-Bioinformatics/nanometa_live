@@ -482,8 +482,10 @@ class AlertEngine:
                 technical_details=f"Pass rate: {pass_rate:.1f}%, Total reads: {total_reads}"
             ))
 
-        # Classification rate
-        if classified_rate < self.alert_rules["quality"]["warning_classified"]:
+        # Classification rate. None (or no reads at all) means not measured
+        # yet; 0.0 there is not a result and must not raise CRITICAL.
+        if (classified_rate is not None and total_reads
+                and classified_rate < self.alert_rules["quality"]["warning_classified"]):
             severity = (AlertSeverity.CRITICAL if classified_rate < self.alert_rules["quality"]["critical_classified"]
                        else AlertSeverity.WARNING)
             alerts.append(Alert(

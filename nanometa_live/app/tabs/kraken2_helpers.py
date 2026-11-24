@@ -25,6 +25,7 @@ RANK_NAMES = {
     "F": "Family",
     "G": "Genus",
     "S": "Species",
+    "S1": "Subspecies",
     "R": "Root",
     "R1": "Superkingdom",
     "U": "Unclassified",

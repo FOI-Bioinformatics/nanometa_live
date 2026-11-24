@@ -92,5 +92,8 @@ def apply_blast_stats(result, stats: Optional[dict]):
         result.coverage_breadth = float(stats.get("avg_coverage", 0.0) or 0.0)
     if not result.percent_identity_mean:
         result.percent_identity_mean = float(stats.get("avg_identity", 0.0) or 0.0)
+    # The TSV has no species column; the sidecar may name it.
+    if not getattr(result, "species", "") and stats.get("species"):
+        result.species = str(stats["species"])
     result.status = result.determine_status()
     return result

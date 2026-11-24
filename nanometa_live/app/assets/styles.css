@@ -3854,3 +3854,37 @@ body {
         opacity: 0.6;
     }
 }
+
+
+/* ============================================
+   ALARM SURFACES IN DARK MODE
+   The verdict banner and the pathogen alert cards keep their light
+   backgrounds in dark mode -- the colour is the verdict -- so their ink
+   must stay dark. Without this they inherited the dark theme's light text
+   and "ACTION REQUIRED" was near-white on pale pink (live test
+   2026-11-24). --dark and --secondary are re-scoped so every descendant
+   that uses them (.pathogen-name, headings) follows.
+   ============================================ */
+[data-theme="dark"] .on-light-surface,
+[data-theme="dark"] .pathogen-alert-critical,
+[data-theme="dark"] .pathogen-alert-high,
+[data-theme="dark"] .pathogen-alert-moderate,
+[data-theme="dark"] .pathogen-alert-watch {
+  --dark: #1F2937;
+  --secondary: #4B5563;
+  color: #1F2937;
+}
+
+[data-theme="dark"] .on-light-surface .text-muted,
+[data-theme="dark"] .pathogen-alert-critical .text-muted,
+[data-theme="dark"] .pathogen-alert-high .text-muted,
+[data-theme="dark"] .pathogen-alert-moderate .text-muted,
+[data-theme="dark"] .pathogen-alert-watch .text-muted {
+  color: #4B5563 !important;
+}
+
+[data-theme="dark"] .on-light-surface .btn-outline-warning,
+[data-theme="dark"] .on-light-surface .btn-outline-secondary {
+  color: #7A4D00;
+  border-color: #B98900;
+}

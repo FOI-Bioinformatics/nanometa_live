@@ -124,6 +124,49 @@ def freshness_map(
     return out
 
 
+#: (main_dir, results fingerprint, samples) -> freshness map. The map holds
+#: file timestamps under ``kraken2/``, which can only change when a file
+#: there changes -- and the results fingerprint advances on exactly that
+#: (kraken2/ is a watched subdirectory, including the settling marker).
+#: Cleared at run boundaries via ``clear_all_loader_caches``.
+_freshness_memo: dict = {}
+
+#: Entries kept. One results directory normally has one live fingerprint;
+#: the cap only bounds a long session that followed several runs.
+_FRESHNESS_MEMO_MAX = 4
+
+
+def clear_freshness_memo() -> None:
+    """Drop the freshness memo (run boundary, or a cold perf cell)."""
+    _freshness_memo.clear()
+
+
+def freshness_map_for_fingerprint(
+    main_dir: str, samples: Iterable[str], fingerprint
+) -> Dict[str, Optional[float]]:
+    """:func:`freshness_map`, reused while the results fingerprint is unchanged.
+
+    ``update_sample_freshness`` runs every tick so the age pills keep
+    counting; rebuilding the map each time cost a scandir and a stat per
+    batch report of every sample (86-98 ms per tick at 96 barcodes x 300
+    batch reports). ``fingerprint`` is the results-fingerprint Store value
+    (dict with ``fp``) or the bare hash; without one nothing is memoised.
+    Returns a copy, so a caller cannot mutate the memo.
+    """
+    fp = fingerprint.get("fp") if isinstance(fingerprint, dict) else fingerprint
+    wanted = tuple(s for s in (samples or []) if s != "All Samples")
+    if not fp:
+        return freshness_map(main_dir, wanted)
+    key = (main_dir, fp, wanted)
+    cached = _freshness_memo.get(key)
+    if cached is None:
+        cached = freshness_map(main_dir, wanted)
+        if len(_freshness_memo) >= _FRESHNESS_MEMO_MAX:
+            _freshness_memo.clear()
+        _freshness_memo[key] = cached
+    return dict(cached)
+
+
 def age_seconds_for(
     last_data_ts: Optional[float], now: float
 ) -> Optional[float]:

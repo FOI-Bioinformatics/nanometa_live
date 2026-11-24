@@ -37,42 +37,50 @@ def _kreport_sample_name(path: str) -> str:
 
 
 def aggregate_fastp_read_stats(summaries: list) -> dict:
-    """Weighted-average read statistics over a list of fastp ``summary`` dicts.
+    """Weighted read statistics over a list of fastp ``summary`` dicts.
 
     Each summary has ``before_filtering`` / ``after_filtering`` blocks with
-    ``total_reads``, ``read1_mean_length`` and ``gc_content``. Mean lengths are
-    read-count-weighted across files; GC is a simple mean of the per-file
-    after-filtering values (converted to a percentage).
+    ``total_reads``, ``total_bases``, a mean read length and ``gc_content``.
+    Mean length is total bases over total reads (exact); when a block lacks
+    ``total_bases`` it is estimated from the block's mean length
+    (``read1_mean_length``, or ``read_length_mean`` as some writers name it).
+    GC is a per-base figure and is weighted by bases; a simple mean of the
+    per-file values let a 10-read file count as much as a 10,000-read one.
 
     Returns ``{"mean_length", "mean_length_before", "gc_content"}`` where the
     "before" and GC values are ``None`` when unavailable.
     """
-    total_reads_after = 0
-    total_reads_before = 0
-    total_length_after = 0
-    total_length_before = 0
-    gc_values = []
+    def _bases(block):
+        bases = block.get("total_bases")
+        if bases:
+            return float(bases)
+        mean_len = block.get("read1_mean_length", block.get("read_length_mean", 0)) or 0
+        return float(mean_len) * float(block.get("total_reads", 0) or 0)
+
+    reads_after = reads_before = 0
+    bases_after = bases_before = 0.0
+    gc_weighted = gc_weight = 0.0
 
     for summary in summaries:
         before = summary.get("before_filtering", {})
         after = summary.get("after_filtering", {})
 
-        reads_before = before.get("total_reads", 0)
-        reads_after = after.get("total_reads", 0)
-        total_reads_before += reads_before
-        total_reads_after += reads_after
+        reads_before += before.get("total_reads", 0) or 0
+        reads_after += after.get("total_reads", 0) or 0
+        b_before = _bases(before)
+        b_after = _bases(after)
+        bases_before += b_before
+        bases_after += b_after
 
-        total_length_after += after.get("read1_mean_length", 0) * reads_after
-        total_length_before += before.get("read1_mean_length", 0) * reads_before
-
-        gc = after.get("gc_content", 0)
-        if gc > 0:
-            gc_values.append(gc * 100)  # Convert to percentage
+        gc = after.get("gc_content", 0) or 0
+        if gc > 0 and b_after > 0:
+            gc_weighted += gc * 100 * b_after  # fraction -> percentage
+            gc_weight += b_after
 
     return {
-        "mean_length": (total_length_after / total_reads_after) if total_reads_after > 0 else 0.0,
-        "mean_length_before": (total_length_before / total_reads_before) if total_reads_before > 0 else None,
-        "gc_content": (sum(gc_values) / len(gc_values)) if gc_values else None,
+        "mean_length": (bases_after / reads_after) if reads_after > 0 else 0.0,
+        "mean_length_before": (bases_before / reads_before) if reads_before > 0 else None,
+        "gc_content": (gc_weighted / gc_weight) if gc_weight > 0 else None,
     }
 
 
@@ -433,22 +441,29 @@ def compute_qc_stat_lines(
             (unclassified_reads * 100) / total_kraken_reads, 1
         )
 
-    # Format output strings
+    # Format output strings. Without a pre-filter count (chopper and
+    # filtlong record none) there is no pass rate and no removal breakdown:
+    # the callback used to take the Kraken2 total as the "raw" count --
+    # Kraken2 sees reads AFTER filtering, so every run read "passed 100%" --
+    # and split the removed reads 60/30/10 by a fixed rule.
     if tot_reads_pre_filt > 0:
-        reads_pre_filtering = f"Raw reads (pre-Chopper): {tot_reads_pre_filt:,}"
+        reads_pre_filtering = f"Raw reads (before filtering): {tot_reads_pre_filt:,}"
+        reads_passed = f"Reads that passed filtering: {tot_passed_reads:,} ({percentage_passed}%)"
+        reads_removed = (
+            f"Total reads removed: {tot_removed_reads:,} ({percentage_removed}%)"
+        )
+        est = " (est.)" if chopper_estimated else ""
+        low_quality = f"Too low quality{est}: {tot_low_quality_reads:,} ({percentage_low_quality}%)"
+        too_short = f"Too short{est}: {tot_too_short_reads:,} ({percentage_too_short}%)"
+        low_complexity = f"Too low complexity{est}: {tot_too_many_N_reads:,} ({percentage_too_many_N}%)"
     else:
-        reads_pre_filtering = "Raw reads (pre-Chopper): — (not available for Chopper pipeline)"
-    reads_passed = f"Reads that passed filtering: {tot_passed_reads:,} ({percentage_passed}%)"
-    reads_removed = (
-        f"Total reads removed: {tot_removed_reads:,} ({percentage_removed}%)"
-    )
-
-    # When chopper is used, the per-category breakdown is an
-    # approximation (chopper does not report these individually).
-    est = " (est.)" if chopper_estimated else ""
-    low_quality = f"Too low quality{est}: {tot_low_quality_reads:,} ({percentage_low_quality}%)"
-    too_short = f"Too short{est}: {tot_too_short_reads:,} ({percentage_too_short}%)"
-    low_complexity = f"Too low complexity{est}: {tot_too_many_N_reads:,} ({percentage_too_many_N}%)"
+        reads_pre_filtering = ("Raw reads (before filtering): not recorded "
+                               "(the read filter reports no input count)")
+        reads_passed = f"Reads that passed filtering: {tot_passed_reads:,}"
+        reads_removed = "Total reads removed: not recorded"
+        low_quality = "Too low quality: not recorded"
+        too_short = "Too short: not recorded"
+        low_complexity = "Too low complexity: not recorded"
 
     classified = (
         f"Classified reads: {classified_reads:,} ({percentage_classified}%)"
@@ -491,3 +506,117 @@ def _get_empty_qc_figures():
         px.bar(title="Sequences per Sample"),
         px.bar(title="Base Pairs per Sample"),
     ]
+
+
+def qc_guidance_issues(pre_filter, passed, classified, total_classified_input):
+    """The QC guidance banner's issues and whether they need action.
+
+    ``pre_filter`` is the read count BEFORE filtering, or None when the read
+    filter records none (chopper, filtlong): a pass rate is judged only when
+    it was measured. The callback used to divide filtered counts by each
+    other, or by nothing, and told every sample of a NanoPlot-only run to
+    re-sequence (live test 2026-11-24). Returns ``(issues, is_action)``.
+    """
+    issues = []
+    is_action = False
+    if pre_filter:
+        pass_rate = min(passed / pre_filter * 100, 100.0)
+        if pass_rate < 60:
+            issues.append(
+                "Pass rate is below 60% - consider checking flow cell health "
+                "and sample quality. Re-sequencing may be needed for reliable results."
+            )
+            is_action = True
+        elif pass_rate < 75:
+            issues.append(
+                "Pass rate is moderate. Results are usable but quality could be improved."
+            )
+
+    classification_rate = (
+        classified / total_classified_input * 100 if total_classified_input else 0
+    )
+    if classification_rate < 40 and total_classified_input > 100:
+        issues.append(
+            "Less than 40% of sequences could be identified. This may indicate "
+            "the sample contains organisms not in the database, or that sequencing "
+            "quality is limiting identification."
+        )
+        is_action = True
+
+    sequenced = pre_filter or passed or total_classified_input
+    if 0 < sequenced < 1000:
+        issues.append(
+            "Fewer than 1,000 total sequences. Continue sequencing for "
+            "more reliable results, especially for low-abundance organisms."
+        )
+    return issues, is_action
+
+
+def seqkit_plot_rows(seqkit_df, seqkit_dir):
+    """QC plot rows from seqkit stats: one per sample with reads.
+
+    The sample name comes from the loader's ``sample`` column (a name with
+    dots, "run.2", was cut to "run" by splitting the file name), and the
+    time is the sample's seqkit file mtime -- ``datetime.now()`` put every
+    sample at one instant on the cumulative-over-time plots. Falls back to
+    the sample's batch_stats directory, then to now.
+    """
+    import os
+    from datetime import datetime
+
+    rows = []
+    for rec in seqkit_df.to_dict("records"):
+        sample = rec.get("sample")
+        if not isinstance(sample, str) or not sample:
+            sample = os.path.basename(str(rec.get("file", "unknown")))
+            for suffix in (".fastq.gz", ".fq.gz", ".fastq", ".fq", ".tsv"):
+                if sample.endswith(suffix):
+                    sample = sample[: -len(suffix)]
+                    break
+        reads = int(rec.get("num_seqs", 0) or 0)
+        if reads <= 0:
+            continue
+        when = None
+        for candidate in (os.path.join(seqkit_dir, f"{sample}.tsv"),
+                          os.path.join(seqkit_dir, sample, "batch_stats")):
+            try:
+                when = datetime.fromtimestamp(os.stat(candidate).st_mtime)
+                break
+            except OSError:
+                continue
+        rows.append({
+            "Sample": sample,
+            "Time": when or datetime.now(),
+            "Reads": reads,
+            "Bp": int(rec.get("sum_len", 0) or 0),
+        })
+    return rows
+
+
+def fastp_quality_rates(payloads):
+    """Base-weighted Q20 %, Q30 % and GC % over fastp payloads (after filtering).
+
+    One computation for the Base Quality card and the QC export: the export
+    read keys the loader does not produce and wrote "N/A" beside the card's
+    values. A rate is None when no payload records its fields.
+    """
+    total_bases = q20 = q30 = gc_weighted = gc_weight = 0.0
+    saw_q = False
+    for payload in payloads or []:
+        after = (payload or {}).get("summary", {}).get("after_filtering", {})
+        bases = float(after.get("total_bases", 0) or 0)
+        total_bases += bases
+        if "q20_bases" in after or "q30_bases" in after:
+            saw_q = True
+        q20 += float(after.get("q20_bases", 0) or 0)
+        q30 += float(after.get("q30_bases", 0) or 0)
+        gc = after.get("gc_content")
+        if gc and bases:
+            gc_weighted += float(gc) * bases
+            gc_weight += bases
+    return {
+        "total_bases": int(total_bases),
+        "q20": q20 / total_bases * 100 if total_bases and saw_q else None,
+        "q30": q30 / total_bases * 100 if total_bases and saw_q else None,
+        "gc": gc_weighted / gc_weight * 100 if gc_weight else None,
+    }

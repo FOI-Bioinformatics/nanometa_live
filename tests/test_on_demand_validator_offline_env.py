@@ -116,3 +116,57 @@ class TestOnDemandValidationOfflineEnv:
             "already-launched task/container processes survive a timeout as "
             "orphans."
         )
+
+
+class TestEnvBuildFailureIsCleanResult:
+    """_build_nextflow_env RAISES RuntimeError in offline mode when a
+    configured conda cache is missing. That call sat outside the try and
+    RuntimeError was not in the except tuple, so it escaped uncaught instead
+    of the clean failed-result path validate_organism builds from a None
+    return (bug audit 2026-11-08, finding 3)."""
+
+    def _validator(self, tmp_path):
+        input_dir = tmp_path / "input"
+        input_dir.mkdir(parents=True)
+        (input_dir / "barcode01.fastq").write_text("@r1\nACGT\n+\nIIII\n")
+        v = OnDemandValidator(
+            results_dir=str(tmp_path / "results"),
+            input_dir=str(input_dir),
+            cache_dir=str(tmp_path / "cache"),
+        )
+        v.genomes_dir.mkdir(parents=True, exist_ok=True)
+        (v.genomes_dir / "263.fasta").write_text(">x\nACGTACGTACGTACGTACGT\n")
+        return v
+
+    def test_runtimeerror_returns_none_not_raise(self, tmp_path, offline_config):
+        v = self._validator(tmp_path)
+        with patch(
+            "nanometa_live.core.workflow.on_demand_validator.NextflowManager."
+            "_build_nextflow_env",
+            side_effect=RuntimeError("conda cache missing"),
+        ):
+            # Must NOT raise; returns None so validate_organism builds a
+            # failed ValidationResult.
+            result = v.validate_via_nanometanf(
+                taxid=263, name="Francisella tularensis", sample="barcode01",
+                method="blast", config=offline_config,
+            )
+        assert result is None
+
+    def test_validate_organism_yields_a_failed_result(self, tmp_path, offline_config):
+        v = self._validator(tmp_path)
+        offline_config["pipeline_source"] = str(
+            tmp_path / "pipeline_source")  # satisfies the pipeline_source gate
+        with patch(
+            "nanometa_live.core.workflow.on_demand_validator.NextflowManager."
+            "_build_nextflow_env",
+            side_effect=RuntimeError("conda cache missing"),
+        ):
+            res = v.validate_organism(
+                taxid=263, name="Francisella tularensis", sample="barcode01",
+                config=offline_config,
+            )
+        # A ValidationResult, not an exception: the clean failed-result path
+        # with its actionable message, not an escaped RuntimeError.
+        assert res is not None
+        assert "did not return a result" in (res.error_message or "")

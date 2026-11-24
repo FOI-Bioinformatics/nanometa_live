@@ -524,10 +524,20 @@ def register_preparation_callbacks(app):
 
         summary = state.get("summary", {})
         ready = state.get("ready", False)
+        # Say what the non-passing checks are: "11/25 passed" read as
+        # fourteen failures when most were warnings that do not block a run.
+        n_warn = summary.get("warnings", 0)
+        n_crit = summary.get("critical_failures", 0)
+        breakdown = []
+        if n_crit:
+            breakdown.append(f"{n_crit} critical")
+        if n_warn:
+            breakdown.append(f"{n_warn} warning{'s' if n_warn != 1 else ''}")
         header = dbc.Alert(
             [
                 html.Strong("Ready" if ready else "Not Ready"),
-                f" - {summary.get('passed', 0)}/{summary.get('total', 0)} checks passed",
+                f" - {summary.get('passed', 0)} of {summary.get('total', 0)} checks passed"
+                + (f" ({', '.join(breakdown)})" if breakdown else ""),
             ],
             color="success" if ready else "danger",
             className="mb-3",
@@ -1460,6 +1470,13 @@ def register_preparation_callbacks(app):
                 # reported the entry "Not Found" while live detection
                 # matched it (2026-08-17 reaudit, G1/G2).
                 "db_taxid": e.get("db_taxid"),
+                # What the Organisms tab's watched cards show; its builder
+                # runs in a background worker whose singleton is empty, and
+                # without these every card read threat "Unknown".
+                "threat_level": e.get("threat_level"),
+                "category": e.get("category"),
+                "annotation": e.get("annotation"),
+                "organism_type": e.get("organism_type"),
             }
             for e in entries
         ]

@@ -154,6 +154,103 @@ def test_overall_status_cache_populated(dash_app, populated_dir):
     assert "_samples_data" in result
 
 
+class TestStatusCacheCarriesRunStateForAlerts:
+    """Bug audit 2026-11-06, item 37: ``_generate_alerts`` read
+    ``running`` / ``completed`` / ``error_count`` / ``pending_files`` /
+    ``processed_files`` off the overall-status dict, which nothing wrote, so
+    the alert engine saw a run that never completed and never erred. The
+    cache now carries them from the backend status, under the engine's
+    names."""
+
+    COMPLETED = {"running": False, "completed": True, "files_processed": 12,
+                 "files_waiting": 3, "errors": ["e1", "e2"]}
+
+    def _cache(self, dash_app, populated_dir, status):
+        fn = get_callback_fn(dash_app, "dashboard-overall-status-cache")
+        with ctx_trigger("results-fingerprint"):
+            return fn("fp-alerts", 0,
+                      {"results_output_directory": populated_dir},
+                      status, ["All Samples"])
+
+    def test_cache_translates_the_backend_status_keys(self, dash_app, populated_dir):
+        cache = self._cache(dash_app, populated_dir, self.COMPLETED)
+        assert cache["running"] is False
+        assert cache["completed"] is True
+        assert cache["processed_files"] == 12
+        # files_waiting is the whole input folder, processed files included;
+        # pending is what has not been processed (3 in the folder, 12
+        # processed -> nothing pending).
+        assert cache["pending_files"] == 0
+        assert cache["error_count"] == 2
+        assert "active_alerts" not in cache, "dead key, computed by nothing"
+
+    def test_completed_run_yields_the_completion_alert(self, dash_app, populated_dir):
+        from nanometa_live.app.tabs import dashboard_helpers
+        from nanometa_live.app.tabs.dashboard_helpers import _generate_alerts
+        from nanometa_live.core.utils.alert_engine import AlertEngine
+
+        cache = self._cache(dash_app, populated_dir, self.COMPLETED)
+        with patch.object(dashboard_helpers, "get_alert_engine",
+                          return_value=AlertEngine()), \
+             patch.object(dashboard_helpers, "_get_active_watchlist_entries",
+                          return_value=[]):
+            alerts = _generate_alerts(
+                cache, populated_dir,
+                {"results_output_directory": populated_dir},
+                cache["_samples_data"],
+            )
+        completion = [a for a in alerts if a.get("category") == "completion"]
+        assert completion, [a.get("message") for a in alerts]
+        assert "Analysis completed" in completion[0]["message"]
+
+    def test_running_run_yields_no_completion_alert(self, dash_app, populated_dir):
+        from nanometa_live.app.tabs import dashboard_helpers
+        from nanometa_live.app.tabs.dashboard_helpers import _generate_alerts
+        from nanometa_live.core.utils.alert_engine import AlertEngine
+
+        cache = self._cache(dash_app, populated_dir,
+                            {"running": True, "completed": False,
+                             "files_processed": 4, "files_waiting": 0,
+                             "errors": []})
+        with patch.object(dashboard_helpers, "get_alert_engine",
+                          return_value=AlertEngine()), \
+             patch.object(dashboard_helpers, "_get_active_watchlist_entries",
+                          return_value=[]):
+            alerts = _generate_alerts(
+                cache, populated_dir,
+                {"results_output_directory": populated_dir},
+                cache["_samples_data"],
+            )
+        assert not [a for a in alerts if a.get("category") == "completion"]
+
+
+def test_pending_files_are_the_unprocessed_part_of_the_input_folder():
+    """files_waiting counts every read file in the watched folder, processed
+    or not. Passed straight through as pending_files, a real-time run with
+    a 400-file folder of which 390 were classified raised "High number of
+    pending files: 400" (threshold 50) while 10 were waiting."""
+    from nanometa_live.app.tabs.dashboard_helpers import run_status_for_alerts
+    status = {"running": True, "files_waiting": 400, "files_processed": 390}
+    assert run_status_for_alerts(status)["pending_files"] == 10
+
+
+def test_pending_files_alert_does_not_fire_on_a_mostly_processed_folder():
+    from nanometa_live.app.tabs.dashboard_helpers import run_status_for_alerts
+    from nanometa_live.core.utils.alert_engine import get_alert_engine
+    run = run_status_for_alerts(
+        {"running": True, "files_waiting": 400, "files_processed": 390})
+    alerts = get_alert_engine()._check_data_processing(run, [])
+    assert not any("pending files" in a.message for a in alerts)
+
+
+def test_run_status_for_alerts_tolerates_a_missing_status():
+    from nanometa_live.app.tabs.dashboard_helpers import run_status_for_alerts
+    assert run_status_for_alerts(None) == {
+        "running": False, "completed": False, "error_count": 0,
+        "pending_files": 0, "processed_files": 0,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # handle_sample_selection
 # --------------------------------------------------------------------------- #
@@ -169,6 +266,21 @@ def test_handle_sample_selection(dash_app):
     assert fn([{"no_sample_key": 1}]) is no_update   # KeyError path
 
 
+def test_grid_selection_follows_the_dropdown(dash_app):
+    """A row stayed selected after the dropdown went back to All Samples, so
+    clicking that row again changed nothing (live test 2026-11-24). The
+    selection is cleared whenever the dropdown names another sample."""
+    from dash.exceptions import PreventUpdate
+    fn = get_callback_fn(dash_app, "dashboard-sample-table.selectedRows",
+                         input_contains="selected-sample")
+    assert fn("All Samples", [{"sample": "barcode02"}]) == []
+    assert fn("barcode03", [{"sample": "barcode02"}]) == []
+    with pytest.raises(PreventUpdate):
+        fn("barcode02", [{"sample": "barcode02"}])
+    with pytest.raises(PreventUpdate):
+        fn("All Samples", [])
+
+
 # --------------------------------------------------------------------------- #
 # update_quality_card (empty path)
 # --------------------------------------------------------------------------- #
@@ -178,3 +290,47 @@ def test_quality_card_empty_does_not_raise(dash_app):
     with ctx_trigger("results-fingerprint"):
         result = fn("fp", {}, {})
     assert result is not None
+
+
+class TestStatusCacheRecomputesOnRunStateChange:
+    """Bug audit 2026-11-08, finding 2: an output-less errored run does not
+    change the results fingerprint, so a fingerprint-only redundant-interval
+    gate never recomputed the status cache and the dashboard Alerts panel
+    missed the error. A run-state change now bypasses the gate, mirroring the
+    verdict banner's _VERDICT_LAST_RUN_STATE bypass."""
+
+    FP = "fp-runstate-f2"
+
+    def _fn(self, dash_app):
+        return get_callback_fn(dash_app, "dashboard-overall-status-cache")
+
+    def test_error_transition_recomputes_without_a_fingerprint_change(
+            self, dash_app, populated_dir):
+        dash_mod._ALERTS_LAST_RUN_STATE.clear()
+        fn = self._fn(dash_app)
+        cfg = {"results_output_directory": populated_dir}
+
+        # Tick 1: running. First render of this fingerprint -> proceeds.
+        with ctx_trigger("update-interval"):
+            first = fn(self.FP, 1, cfg, {"running": True, "errors": []},
+                       ["All Samples"])
+        assert isinstance(first, dict)
+        assert first["error_count"] == 0
+
+        # Tick 2: still running, same fingerprint, interval trigger -> the gate
+        # still debounces a genuinely redundant refresh.
+        with ctx_trigger("update-interval"):
+            with pytest.raises(PreventUpdate):
+                fn(self.FP, 2, cfg, {"running": True, "errors": []},
+                   ["All Samples"])
+
+        # Tick 3: the run errored with no new output (same fingerprint). The
+        # run-state change (ACTIVE -> ERROR) must bypass the gate so the error
+        # reaches the alert engine.
+        with ctx_trigger("update-interval"):
+            errored = fn(self.FP, 3, cfg,
+                         {"running": False, "completed": False,
+                          "pipeline_status": "error", "errors": ["boom"]},
+                         ["All Samples"])
+        assert isinstance(errored, dict), "error transition must recompute the cache"
+        assert errored["error_count"] == 1

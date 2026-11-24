@@ -439,11 +439,19 @@ def register_readiness(app, backend_manager):
             badge_children = [html.I(className="bi bi-check-circle-fill me-1"), "Ready"]
             badge_color = "success"
         else:
+            # Name what is wrong: "17/25 checks" in red read as seventeen
+            # (or eight) failures when most of the rest were warnings.
+            n_crit = summary.get("critical_failures", 0)
+            n_warn = summary.get("warnings", 0)
+            if n_crit:
+                label = f"{n_crit} blocking"
+            else:
+                label = f"{n_warn} warning{'s' if n_warn != 1 else ''}"
             badge_children = [
                 html.I(className="bi bi-exclamation-triangle-fill me-1"),
-                f"{summary.get('passed', 0)}/{summary.get('total', 0)} checks",
+                label,
             ]
-            badge_color = "danger" if summary.get("critical_failures", 0) > 0 else "warning"
+            badge_color = "danger" if n_crit > 0 else "warning"
 
         popover_items = []
         for c in checks:
@@ -501,7 +509,7 @@ def register_readiness(app, backend_manager):
         last_session = str(paths.last_session_yaml)
         badge_style = {"fontSize": "0.75rem", "display": "inline-block"}
         if os.path.exists(last_session):
-            return "Auto-saved", "success", badge_style
+            return "Session saved", "success", badge_style
         return "Not saved", "secondary", badge_style
 
     # ========================================================================

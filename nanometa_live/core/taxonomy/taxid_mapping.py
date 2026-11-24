@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from nanometa_live.core.taxonomy.database_profile import DatabaseProfile
+from nanometa_live.core.utils.atomic_write import atomic_write_json
+from nanometa_live.core.taxonomy.pseudo_taxid import stable_pseudo_taxid
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,17 @@ class TaxidMapping:
     # Alternative matches (for review)
     alternative_matches: List[AlternativeMatch] = field(default_factory=list)
 
+    # The collection key this mapping is stored under, when it is NOT the
+    # NCBI taxid. Several watchlist entries can legitimately share one NCBI
+    # taxid while naming different database nodes (GTDB splits polyphyletic
+    # species; NCBI has no id for many subspecies), and the collection is a
+    # dict keyed by taxid, so those entries overwrote each other -- the three
+    # Bioshield *E. coli* variants became one mapping and the other two
+    # database nodes were mapped by nothing (audit 2026-11-06, finding 30).
+    # Persisted so a reload reconstructs the same keys; None means "keyed by
+    # ncbi_taxid", which is every mapping in a file written before this.
+    entry_key: Optional[int] = None
+
     # Manual override tracking
     manually_verified: bool = False
     verified_by: Optional[str] = None
@@ -124,6 +137,11 @@ class TaxidMapping:
     def is_mapped(self) -> bool:
         """Check if this entry has a valid database mapping."""
         return self.db_taxid is not None and self.confidence != MappingConfidence.UNMAPPED
+
+    @property
+    def collection_key(self) -> int:
+        """The key this mapping belongs under in a collection."""
+        return self.entry_key if self.entry_key is not None else self.ncbi_taxid
 
     def needs_review(self) -> bool:
         """Check if this mapping should be manually reviewed."""
@@ -145,6 +163,7 @@ class TaxidMapping:
             "match_score": self.match_score,
             "match_method": self.match_method,
             "alternative_matches": [m.to_dict() for m in self.alternative_matches],
+            "entry_key": self.entry_key,
             "manually_verified": self.manually_verified,
             "verified_by": self.verified_by,
             "verified_at": self.verified_at.isoformat() if self.verified_at else None,
@@ -168,6 +187,7 @@ class TaxidMapping:
                 AlternativeMatch.from_dict(m)
                 for m in data.get("alternative_matches", [])
             ],
+            entry_key=data.get("entry_key"),
             manually_verified=data.get("manually_verified", False),
             verified_by=data.get("verified_by"),
             verified_at=datetime.fromisoformat(data["verified_at"]) if data.get("verified_at") else None,
@@ -605,17 +625,23 @@ class TaxidMappingCollection:
         # Load mappings
         for mapping_data in data.get("mappings", []):
             mapping = TaxidMapping.from_dict(mapping_data)
-            collection.mappings[mapping.ncbi_taxid] = mapping
+            collection.mappings[mapping.collection_key] = mapping
 
         return collection
 
     def save(self, filepath: str) -> bool:
-        """Save collection to JSON file."""
+        """Save collection to JSON file, atomically.
+
+        ``open(path, "w")`` truncates first, so a crash or a second process
+        reading mid-write saw a truncated file -- and a truncated mappings
+        file does not fail loudly: ``load`` returns None and every entry
+        reads UNMAPPED, i.e. "this organism is not in the database", which
+        is a negative result the operator may act on (audit 2026-11-06,
+        finding 34). This file also carries the operator's manual
+        verifications, which nothing else can reconstruct.
+        """
         try:
-            path = Path(filepath)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, 'w') as f:
-                json.dump(self.to_dict(), f, indent=2)
+            atomic_write_json(filepath, self.to_dict())
             logger.info(f"Saved mapping collection to {filepath}")
             return True
         except (FileNotFoundError, PermissionError, OSError, TypeError, ValueError) as e:
@@ -682,7 +708,11 @@ def slim_mapping_store_payload(collection_dict: Dict[str, Any]) -> Dict[str, Any
     """The browser-store form of a serialized mapping collection."""
     return {
         "mappings": {
-            str(m["ncbi_taxid"]): {
+            # Keyed by the mapping's own collection key, so a fork entry's
+            # mapping is not dropped by a key collision with the primary
+            # entry's (see TaxidMapping.entry_key). The UI looks a row up by
+            # its NCBI taxid, which is unchanged for every primary entry.
+            str(m.get("entry_key") or m["ncbi_taxid"]): {
                 k: m.get(k) for k in _STORE_MAPPING_FIELDS
             }
             for m in collection_dict.get("mappings", [])
@@ -893,10 +923,13 @@ class TaxidMapper:
                     f"Built database index: {len(self._index.by_taxid)} nodes "
                     f"in {build_time:.2f}s"
                 )
-                # Save to JSON cache for next time
+                # Save to JSON cache for next time. Atomically: a
+                # truncated index file is discarded on load and the whole
+                # database is re-indexed, which on a field laptop is minutes
+                # of startup the operator cannot account for.
                 try:
-                    with open(cache_path, 'w') as f:
-                        json.dump(self._index.to_dict(), f)
+                    atomic_write_json(cache_path, self._index.to_dict(),
+                                      indent=None)
                     logger.info(f"Saved database index to cache: {cache_path}")
                 except (FileNotFoundError, PermissionError, OSError, TypeError, ValueError) as e:
                     logger.exception(f"Failed to cache database index: {e}")
@@ -946,6 +979,37 @@ class TaxidMapper:
                 logger.info(f"Loaded cached mappings: {self._collection.total_entries} entries")
 
         return True
+
+    def _mapping_key(
+        self,
+        ncbi_taxid: int,
+        db_taxid: Optional[int],
+        name: str,
+    ) -> int:
+        """The collection key a watchlist entry owns.
+
+        The lookup side of ``WatchlistManager._identity_key``, applied to the
+        mapping collection: normally the NCBI taxid, but an entry naming a
+        DIFFERENT database node than the mapping already sitting on that
+        taxid is a different organism and gets its own key. Without this the
+        collection is last-writer-wins over entries that share an NCBI taxid
+        -- the three Bioshield *E. coli* variants (all NCBI 562, three GTDB
+        nodes) left one mapping, so two nodes resolved to no watchlist entry
+        in ``_build_db_taxid_index`` (audit 2026-11-06, finding 30).
+
+        Entries that agree on the node, or where either side is silent about
+        it, keep sharing the key and overwrite as before: that is the same
+        organism arriving twice.
+        """
+        if self._collection is None or not db_taxid:
+            return ncbi_taxid
+        existing = self._collection.mappings.get(ncbi_taxid)
+        if existing is None or not existing.db_taxid or existing.db_taxid == db_taxid:
+            return ncbi_taxid
+        other = self._collection.mappings.get(db_taxid)
+        if other is None or other.db_taxid == db_taxid:
+            return db_taxid
+        return stable_pseudo_taxid(f"{name}|{db_taxid}")
 
     def generate_mappings(
         self,
@@ -1006,9 +1070,23 @@ class TaxidMapper:
             if not name:
                 continue
 
+            # Which key this entry owns. Normally the NCBI taxid; a fork --
+            # an entry naming a different database node than an earlier entry
+            # with the same NCBI taxid -- gets its own key, exactly as
+            # WatchlistManager._identity_key does when storing the entries.
+            # Keyed on the taxid alone, the three Bioshield *E. coli* variants
+            # overwrote each other and two of the three database nodes ended
+            # up mapped by nothing (audit 2026-11-06, finding 30).
+            declared_db_taxid = entry.get("db_taxid")
+            key = self._mapping_key(
+                ncbi_taxid,
+                int(declared_db_taxid) if declared_db_taxid else None,
+                name,
+            )
+
             # Check for existing manual override
-            if preserve_manual and ncbi_taxid in self._collection.mappings:
-                existing = self._collection.mappings[ncbi_taxid]
+            if preserve_manual and key in self._collection.mappings:
+                existing = self._collection.mappings[key]
                 if existing.manually_verified:
                     logger.debug(f"Preserving manual mapping for {name}")
                     continue
@@ -1021,12 +1099,13 @@ class TaxidMapper:
             # reaudit, G1). The declaration is validated against the loaded
             # index; a node absent from this build is recorded as such
             # rather than silently trusted.
-            declared = entry.get("db_taxid")
+            declared = declared_db_taxid
             if declared:
                 declared = int(declared)
                 node = self._index.by_taxid.get(declared)
-                self._collection.mappings[ncbi_taxid] = (TaxidMapping(
+                self._collection.mappings[key] = (TaxidMapping(
                     ncbi_taxid=ncbi_taxid,
+                    entry_key=(key if key != ncbi_taxid else None),
                     canonical_name=name,
                     db_taxid=declared if node else None,
                     db_name=(node.name if node else ""),
@@ -1085,6 +1164,7 @@ class TaxidMapper:
             # Create mapping
             mapping = TaxidMapping(
                 ncbi_taxid=ncbi_taxid,
+                entry_key=(key if key != ncbi_taxid else None),
                 canonical_name=name,
                 db_taxid=match_result.matched_taxid,
                 db_name=match_result.matched_name,
@@ -1103,7 +1183,7 @@ class TaxidMapper:
                 ]
             )
 
-            self._collection.mappings[ncbi_taxid] = mapping
+            self._collection.mappings[key] = mapping
 
         # Update statistics
         self._collection.update_statistics()

@@ -251,8 +251,15 @@
   {% else %}
     {% set run_clause = "" %}
   {% endif %}
-  {% if data.unprocessed_input_files %}
-    {% set run_clause = run_clause ~ " (" ~ data.unprocessed_input_files ~ " input file" ~ ("s" if data.unprocessed_input_files != 1 else "") ~ " in the watched folder " ~ ("were" if data.unprocessed_input_files != 1 else "was") ~ " never processed)" %}
+  {#
+    Exact when the backend counted the pipeline's processed-inputs ledger;
+    otherwise the inbox minus files processed, which also counts files the
+    age filter skipped or an earlier run classified, so it claims no cause.
+  #}
+  {% if data.unprocessed_input_files and data.unprocessed_input_exact %}
+    {% set run_clause = run_clause ~ " (" ~ data.unprocessed_input_files ~ " input file" ~ ("s" if data.unprocessed_input_files != 1 else "") ~ " in the watched folder " ~ ("were" if data.unprocessed_input_files != 1 else "was") ~ " not classified by this run)" %}
+  {% elif data.unprocessed_input_files %}
+    {% set run_clause = run_clause ~ " (the watched folder held " ~ data.unprocessed_input_files ~ " more input file" ~ ("s" if data.unprocessed_input_files != 1 else "") ~ " than were processed)" %}
   {% endif %}
   {#
     Tasks lost to error isolation (round-4 audit, H20). A corrupt input
@@ -277,8 +284,24 @@
 
   <!-- DECISION BANNER -->
   {% set detected_threats = data.watched_results | selectattr("detected") | list %}
-  {% set critical_threats = detected_threats | selectattr("threat_level", "equalto", "critical") | list %}
-  {% set high_threats = detected_threats | selectattr("threat_level", "equalto", "high") | list %}
+  {#
+    ACTION REQUIRED is reserved for a detection that clears the ENTRY's own
+    alert_threshold, mirroring the dashboard: select_verdict decides on the
+    above-threshold list and renders a below-threshold hit as MONITORING.
+    This banner alarmed on a single read of a critical entry where the
+    dashboard did not (audit 2026-11-06, finding 36) -- and a threshold set
+    to 100 exists because one read of that organism is not actionable.
+
+    Nothing is hidden: a below-threshold detection still reaches
+    detected_threats and renders REVIEW RECOMMENDED, and the Watched
+    Organisms table lists its reads either way. rejectattr (not selectattr)
+    so a row from a caller that supplies no above_threshold key -- every
+    pre-existing caller, and the exported report of an older run -- keeps
+    the previous behaviour instead of silently dropping out of the banner.
+  #}
+  {% set alarming_threats = detected_threats | rejectattr("above_threshold", "equalto", false) | list %}
+  {% set critical_threats = alarming_threats | selectattr("threat_level", "equalto", "critical") | list %}
+  {% set high_threats = alarming_threats | selectattr("threat_level", "equalto", "high") | list %}
 
   {% if critical_threats or high_threats %}
   <div class="decision-banner banner-action">

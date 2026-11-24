@@ -8,6 +8,7 @@ information for first responders and laboratory personnel.
 
 import os
 import glob
+import time
 import pandas as pd
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
@@ -19,6 +20,8 @@ import dash_bootstrap_components as dbc
 
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.app.tabs.dashboard_helpers import _fingerprint_marks_dir_seen
+from nanometa_live.app.utils.countdown import remaining_from_deadline
+from nanometa_live.core.taxonomy.ranks import count_organisms_found
 from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
     load_nanoplot_stats,
@@ -39,9 +42,7 @@ from nanometa_live.app.utils.debounce import (
     mark_rendered,
 )
 from nanometa_live.app.utils.throughput import (
-    BUFFER_LIMIT,
-    append_tick,
-    classify_state,
+    advance_throughput,
     compute_rates,
     format_age_seconds,
     last_nonzero_delta_ts,
@@ -79,6 +80,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     _format_time_elapsed,
     _collect_samples_data,
     _generate_alerts,
+    run_status_for_alerts,
     _estimate_pass_rate_from_quality,
     _estimate_classified_rate,
     _get_alerts_badge_color,
@@ -100,6 +102,7 @@ from nanometa_live.app.app import background_callback_manager
 # update_verdict_banner). In-process on purpose: after a restart the worst
 # case is one extra render.
 _VERDICT_LAST_RUN_STATE: dict = {}
+_ALERTS_LAST_RUN_STATE: dict = {}
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +119,13 @@ def _batch_progress_verdict_clause(results_dir: Optional[str]) -> Optional[str]:
     try:
         p = batch_progress(results_dir)
         if p.preliminary or p.pending:
+            n = len(p.preliminary) + len(p.pending)
+            if p.ended_early:
+                # The run is over; nothing is classifying any more. The
+                # stopped/error clause beside this one says why.
+                return f"{n} of {len(p.planned)} barcodes not fully classified"
             return (
-                f"preliminary: {len(p.preliminary) + len(p.pending)} of "
-                f"{len(p.planned)} barcodes still classifying"
+                f"preliminary: {n} of {len(p.planned)} barcodes still classifying"
             )
     except Exception:
         pass
@@ -194,9 +201,30 @@ def register_dashboard_callbacks(app: Dash):
     )
     def compute_overall_status_cache(_fingerprint, _n_intervals, config, status, available_samples):
         """Compute overall status once per interval and cache for other callbacks."""
-        if interval_tick_is_redundant(ctx, "dashboard_overall_status", _fingerprint):
+        # A run-state change (e.g. running -> error, or -> completed) must
+        # recompute the cache even when no new output files landed: the alert
+        # engine's error and completion branches read the run state merged in
+        # below (run_status_for_alerts), and the results fingerprint does NOT
+        # change on an output-less errored run, so a fingerprint-only gate let
+        # the dashboard Alerts panel miss the error (bug audit 2026-11-08,
+        # finding 2). Mirrors the verdict banner's _VERDICT_LAST_RUN_STATE
+        # bypass; backend-status stays a State so its every-tick churn does not
+        # defeat the gate.
+        st = status or {}
+        run_state_now = (
+            "ACTIVE" if st.get("running")
+            else "ERROR" if st.get("pipeline_status") == "error"
+            else "COMPLETE" if st.get("completed")
+            else "STOPPED" if st.get("stopped_run")
+            else "STANDBY"
+        )
+        state_changed = _ALERTS_LAST_RUN_STATE.get("v") != run_state_now
+        if (not state_changed
+                and interval_tick_is_redundant(
+                    ctx, "dashboard_overall_status", _fingerprint)):
             raise PreventUpdate
         mark_rendered("dashboard_overall_status", _fingerprint)
+        _ALERTS_LAST_RUN_STATE["v"] = run_state_now
 
         should_load, main_dir = _should_load_data(config, status, available_samples)
         if not should_load:
@@ -206,6 +234,10 @@ def register_dashboard_callbacks(app: Dash):
             available_samples = _resolve_samples(main_dir, available_samples)
             pipeline_running = status.get("running", False)
             overall_status = _calculate_overall_status(main_dir, config, available_samples, pipeline_running)
+            # The alert engine's run-state inputs (completion, error and
+            # backlog alerts) come from the backend status this callback
+            # already holds; _generate_alerts reads them off this dict.
+            overall_status.update(run_status_for_alerts(status))
             # Include main_dir and samples_data so downstream callbacks don't recompute
             overall_status["_main_dir"] = main_dir
             overall_status["_samples_data"] = _collect_samples_data(main_dir, available_samples)
@@ -288,14 +320,15 @@ def register_dashboard_callbacks(app: Dash):
         pipeline_running = status.get("running", False) if status else False
         pipeline_completed = status.get("completed", False) if status else False
         start_time = status.get("start_time") if status else None
-        time_elapsed = _format_time_elapsed(start_time)
+        ended_at = (status.get("ended_at")
+                    if status and not pipeline_running else None)
+        time_elapsed = _format_time_elapsed(start_time, ended_at)
         last_updated_str = "Last updated " + datetime.now().strftime("%H:%M:%S")
         # U3: realtime-timeout countdown. Surfaced inside the verdict
         # banner's right column when the pipeline is running and the
         # operator configured a timeout. None = render nothing.
-        auto_stop_remaining_s = (
-            status.get("auto_stop_remaining_s") if status else None
-        )
+        auto_stop_remaining_s = remaining_from_deadline(
+            status.get("auto_stop_deadline") if status else None, time.time())
 
         # Check whether any validation results exist (used for confidence qualifier)
         validation_has_results = bool(
@@ -362,6 +395,8 @@ def register_dashboard_callbacks(app: Dash):
         )
 
         kraken_has_data = False
+        load_failed = False
+        load_error: Optional[str] = None
         dangerous: List[Dict[str, Any]] = []
         subthreshold: List[Dict[str, Any]] = []
         n_watched = 0
@@ -408,8 +443,12 @@ def register_dashboard_callbacks(app: Dash):
                     kraken_has_data = True
             except Exception as e:
                 logger.error(f"Error updating verdict banner: {e}", exc_info=True)
-                # A load failure falls back to STANDBY, matching the original.
-                main_dir_available = False
+                # A load failure is its own state, RESULTS UNREADABLE: it
+                # used to fall back to STANDBY, which rendered a running run
+                # whose report could not be parsed as "nothing to do"
+                # (field audit 2026-10-28, M1).
+                load_failed = True
+                load_error = f"{type(e).__name__}: {str(e)[:160]}"
                 kraken_has_data = False
                 dangerous = []
                 subthreshold = []
@@ -445,6 +484,11 @@ def register_dashboard_callbacks(app: Dash):
             # the verdict's attribution names the pipeline's grouping.
             input_layout_mismatch=(status or {}).get("input_layout_mismatch"),
             batch_progress_clause=_batch_progress_verdict_clause(main_dir),
+            # Free space on the results volume, polled by the backend each
+            # tick (field audit 2026-10-28, M3).
+            disk_low=(status or {}).get("disk_low"),
+            load_failed=load_failed,
+            load_error=load_error,
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes
@@ -695,12 +739,8 @@ def register_dashboard_callbacks(app: Dash):
                 )
                 sample_reads = sample_classified + sample_unclassified
                 sequences_count = f"{sample_reads:,}"
-                if not sample_kraken_df.empty:
-                    org_df = sample_kraken_df[sample_kraken_df["rank"].isin(["S", "G"])]
-                    org_df = org_df[org_df["taxid"] > 1]
-                    organisms_count = str(len(org_df[org_df["reads"] >= 1]))
-                else:
-                    organisms_count = "0"
+                # Same rule as the Organisms tab (count_organisms_found).
+                organisms_count = str(count_organisms_found(sample_kraken_df))
             else:
                 sequences_count = f"{overall_status['total_reads']:,}"
                 organisms_count = str(overall_status['organisms_detected'])
@@ -820,6 +860,25 @@ def register_dashboard_callbacks(app: Dash):
             return no_update
 
     @app.callback(
+        Output("dashboard-sample-table", "selectedRows"),
+        # The Store, not the dropdown: it mirrors the dropdown (one writer,
+        # update_selected_sample) and dashboard callbacks key on it.
+        Input("selected-sample", "data"),
+        State("dashboard-sample-table", "selectedRows"),
+        prevent_initial_call=True,
+    )
+    def sync_table_selection_to_selector(value, selected_rows):
+        """Clear the grid's row selection when the dropdown names another sample.
+
+        Otherwise the row stayed highlighted after the dropdown went back to
+        All Samples, and clicking it again changed nothing: AG Grid does not
+        re-emit an unchanged selection (live test 2026-11-24).
+        """
+        if not selected_rows or selected_rows[0].get("sample") == value:
+            raise PreventUpdate
+        return []
+
+    @app.callback(
         [
             Output("dashboard-pathogen-alert-container", "children"),
             Output("dashboard-pathogen-alert-container", "style")
@@ -862,9 +921,12 @@ def register_dashboard_callbacks(app: Dash):
         # triggers (fingerprint change, watchlist toggle) always render.
         if interval_tick_is_redundant(ctx, "dashboard_pathogen_alert", _fingerprint):
             raise PreventUpdate
-        mark_rendered("dashboard_pathogen_alert", _fingerprint)
+        # Stamp the memo only after the debounce: a debounced trigger never
+        # reached the screen, and recording it as rendered made every
+        # backstop tick for the memo TTL (120 s) skip the refresh.
         if should_skip_update("dashboard_pathogen_alert", debounce_ms=2000):
             raise PreventUpdate
+        mark_rendered("dashboard_pathogen_alert", _fingerprint)
 
         if not config:
             return html.Div(), {"display": "none"}
@@ -1423,7 +1485,6 @@ def register_dashboard_callbacks(app: Dash):
         if buffer_dir is not None and buffer_dir != current_dir:
             buffer = {}
 
-        ticks = list((buffer or {}).get("ticks", []) or [])
         running = bool(status and status.get("running"))
 
         total_reads = 0
@@ -1441,29 +1502,34 @@ def register_dashboard_callbacks(app: Dash):
                 total_files = 0
 
         now = _time.time()
-        new_ticks = append_tick(ticks, now, total_reads, total_files)
+        # advance_throughput carries the last-progress time across ticks:
+        # the rate window is shorter than the stall threshold, so from the
+        # window alone a stalled run read "idle" for ever.
+        new_buffer, state = advance_throughput(
+            buffer, now, total_reads, total_files, running)
+        new_ticks = new_buffer["ticks"]
         rpm, fpm = compute_rates(new_ticks)
-        state = classify_state(new_ticks, now, running)
-
-        new_buffer = {
-            "dir": current_dir,
-            "ticks": new_ticks,
-            "reads_per_min": rpm,
-            "files_per_min": fpm,
-            "stalled_since": (
-                last_nonzero_delta_ts(new_ticks) if state == "stalled" else None
+        new_buffer.update(
+            dir=current_dir,
+            reads_per_min=rpm,
+            files_per_min=fpm,
+            stalled_since=(
+                new_buffer.get("last_progress") if state == "stalled" else None
             ),
-        }
+        )
 
         children, class_name = _render_throughput_tile(
-            state, rpm, fpm, new_ticks, now
+            state, rpm, fpm, new_ticks, now,
+            last_progress=new_buffer.get("last_progress"),
+            watch_since=new_buffer.get("watch_since"),
         )
         return children, class_name, new_buffer
 
 # Helper functions
 
 
-def _render_throughput_tile(state, rpm, fpm, ticks, now):
+def _render_throughput_tile(state, rpm, fpm, ticks, now,
+                            last_progress=None, watch_since=None):
     """(children, className) for the header throughput tile."""
     if state == "idle":
         return (
@@ -1475,7 +1541,10 @@ def _render_throughput_tile(state, rpm, fpm, ticks, now):
             "throughput-tile ms-3 small text-muted",
         )
     if state == "stalled":
-        last_progress = last_nonzero_delta_ts(ticks)
+        if last_progress is None:
+            last_progress = last_nonzero_delta_ts(ticks)
+        if last_progress is None:
+            last_progress = watch_since
         age = (now - last_progress) if last_progress else (
             now - float(ticks[0]["ts"]) if ticks else 0
         )

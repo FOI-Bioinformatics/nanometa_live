@@ -13,7 +13,7 @@ import logging
 
 import pandas as pd
 
-from nanometa_live.core.taxonomy.ranks import is_species_rank
+from nanometa_live.core.taxonomy.ranks import is_species_rank, count_organisms_found  # noqa: F401  (re-exported)
 from dash import html
 import dash_bootstrap_components as dbc
 
@@ -112,7 +112,7 @@ def remove_species_from_watchlist(taxid: int, watchlist: list) -> list:
     return [s for s in watchlist if s.get("taxid") != taxid]
 
 
-def filter_detected_species(kraken_df, watchlist: list) -> list:
+def filter_detected_species(kraken_df, watchlist: list, entries_snapshot=None) -> list:
     """
     Filter detected species from kraken data that are in the watchlist.
 
@@ -126,9 +126,12 @@ def filter_detected_species(kraken_df, watchlist: list) -> list:
     if kraken_df is None or kraken_df.empty:
         return []
 
-    # Get WatchlistManager and active entries
+    # Get WatchlistManager and active entries (the snapshot stands in for
+    # the empty singleton of a background worker).
     manager = get_watchlist_manager()
     active_entries = manager.get_active_entries()
+    if not active_entries and entries_snapshot:
+        active_entries = _entries_from_snapshot(entries_snapshot)
 
     # Guard on BOTH sources, matching get_all_watchlist_with_detection. The
     # two are required to agree -- this function drives the alert banner and
@@ -221,7 +224,36 @@ def filter_detected_species(kraken_df, watchlist: list) -> list:
     return result_df.to_dict('records')
 
 
-def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
+def _entries_from_snapshot(entries_snapshot):
+    """Active entries rebuilt from the ``watchlist-entries-snapshot`` Store.
+
+    A background worker's WatchlistManager singleton is empty (CLAUDE.md,
+    "Background callback isolation"); the snapshot is the main process's
+    copy. Keyed like the manager, by (taxid, db_taxid), so entries sharing
+    an NCBI taxid stay distinct. Disabled entries are left out.
+    """
+    from types import SimpleNamespace
+    out = {}
+    for e in entries_snapshot or []:
+        if not e.get("enabled", True):
+            continue
+        level = e.get("threat_level")
+        out[(e.get("taxid"), e.get("db_taxid"))] = SimpleNamespace(
+            taxid=e.get("taxid"),
+            db_taxid=e.get("db_taxid"),
+            name=e.get("name", ""),
+            names_alt=e.get("names_alt", []),
+            threat_level=SimpleNamespace(value=level) if level else None,
+            category=e.get("category") or "custom",
+            organism_type=e.get("organism_type"),
+            annotation=e.get("annotation") or "",
+            enabled=True,
+        )
+    return out
+
+
+def get_all_watchlist_with_detection(kraken_df, watchlist: list,
+                                     entries_snapshot=None) -> list:
     """
     Get ALL watchlist entries with their detection status from Kraken2 data.
 
@@ -229,10 +261,15 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
     regardless of detection status. Undetected entries have reads=0.
 
     This provides complete visibility into what's being monitored.
+
+    ``entries_snapshot`` (the watchlist-entries-snapshot Store) stands in for
+    the manager when its singleton is empty, as it is in a background worker.
     """
     # Get WatchlistManager and active entries
     manager = get_watchlist_manager()
     active_entries = manager.get_active_entries()
+    if not active_entries and entries_snapshot:
+        active_entries = _entries_from_snapshot(entries_snapshot)
 
     if not active_entries and not watchlist:
         return []
@@ -303,27 +340,39 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
             if name_key:
                 name_lookup[name_key] = entry
 
-    # Build result list from ALL active watchlist entries
+    # Build result list from ALL active watchlist entries. One row per
+    # ENTRY: active_entries is keyed by the manager's identity key, which
+    # separates entries sharing an NCBI taxid but naming different database
+    # nodes (E. coli / E. coli_E / E. coli_F all carry 562). Deduplicating on
+    # the NCBI taxid here kept one of them and dropped the rest.
     result = []
     seen_taxids = set()
+    entries_per_taxid = {}
+    for entry in active_entries.values():
+        entries_per_taxid[entry.taxid] = entries_per_taxid.get(entry.taxid, 0) + 1
 
     for entry_id, entry in active_entries.items():
-        if entry.taxid in seen_taxids:
-            continue
         seen_taxids.add(entry.taxid)
 
         # Try to find detection in Kraken2 data
-        # 1. Check by NCBI taxid directly
-        # 2. Check by mapped Kraken2 db_taxid
-        # 3. Check by species name (fallback; matches the matching
-        #    strategy used by filter_detected_species so the badge
-        #    count and the cards-render path agree).
+        # 1. The entry's own database node, when it names one
+        # 2. The NCBI taxid directly, unless several entries share it (the
+        #    shared taxid resolves to ONE of their nodes, so a variant would
+        #    borrow a sibling's reads)
+        # 3. The mapped Kraken2 db_taxid
+        # 4. Species name (fallback; matches the matching strategy used by
+        #    filter_detected_species so the badge count and the
+        #    cards-render path agree).
         detection = None
-        db_taxid = ncbi_to_db.get(entry.taxid, entry.taxid)
+        own_db_taxid = ncbi_to_db.get(entry_id)
+        db_taxid = own_db_taxid or ncbi_to_db.get(entry.taxid, entry.taxid)
+        shared_taxid = entries_per_taxid.get(entry.taxid, 0) > 1
 
-        if entry.taxid in kraken_lookup:
+        if own_db_taxid and own_db_taxid in kraken_lookup:
+            detection = kraken_lookup[own_db_taxid]
+        elif not shared_taxid and entry.taxid in kraken_lookup:
             detection = kraken_lookup[entry.taxid]
-        elif db_taxid in kraken_lookup:
+        elif not shared_taxid and db_taxid in kraken_lookup:
             detection = kraken_lookup[db_taxid]
         else:
             name_key = (entry.name or '').strip().lower()
@@ -379,7 +428,8 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
     return result
 
 
-def build_organism_export(table_data: list, export_format: str, filename: str = "") -> dict:
+def build_organism_export(table_data: list, export_format: str, filename: str = "",
+                          total_reads=None, sample=None) -> dict:
     """Build the dcc.Download payload for an organism-table export.
 
     Pure given the table rows + format. Returns a dict with ``content`` /
@@ -428,8 +478,12 @@ def build_organism_export(table_data: list, export_format: str, filename: str = 
             "=" * 60,
             "",
             f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            f"  Total Organisms: {len(df)}",
-            f"  Total DNA Sequences: {df['reads'].sum():,}",
+            f"  Sample: {sample or 'All Samples'}",
+            # Rows across ranks: a genus row already contains its species,
+            # so neither the row count nor the summed reads is a total.
+            f"  Rows listed: {len(df)}",
+            ("  Total DNA Sequences: "
+             + (f"{int(total_reads):,}" if total_reads else "not available")),
             "",
             "-" * 60,
             "  TOP ORGANISMS BY ABUNDANCE",
@@ -460,7 +514,8 @@ def build_organism_export(table_data: list, export_format: str, filename: str = 
             "  NOTES:",
             "  - Sp. = Species, Gen. = Genus, Fam. = Family",
             "  - Reads = Number of DNA sequences classified",
-            "  - % = Percentage of total classified sequences",
+            "  - % = share of all reads in the sample (a rank's reads include",
+            "    those of the ranks below it)",
             "",
             "=" * 60,
             "                    END OF REPORT",
@@ -547,3 +602,18 @@ def not_detected_caveat(
         f"- too few to rule these organisms out. Screening is inconclusive "
         f"at this depth, not negative."
     )
+
+
+def resolve_min_abundance(value, default=0.1):
+    """The Organisms filter's minimum abundance (%), from the input box.
+
+    Only an empty box falls back to the default: ``value or 0.1`` turned a
+    typed 0 into 0.1, so the filter could not be switched off. Negative
+    values clamp to 0.
+    """
+    if value is None or value == "":
+        return float(default)
+    try:
+        return max(float(value), 0.0)
+    except (TypeError, ValueError):
+        return float(default)

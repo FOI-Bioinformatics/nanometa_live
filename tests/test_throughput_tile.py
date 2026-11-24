@@ -90,3 +90,68 @@ def test_format_age_seconds():
     assert format_age_seconds(45) == "45s"
     assert format_age_seconds(60) == "1m00s"
     assert format_age_seconds(192) == "3m12s"
+
+
+# --- Stall detection over a real tick cadence --------------------------------
+#
+# The buffer holds BUFFER_LIMIT ticks, about 50 s at the 10 s run cadence,
+# while STALL_THRESHOLD_S is 120 s. Classified from the buffer alone, the
+# last progress tick fell out of the window long before the threshold and
+# the oldest tick was never 120 s old: a run whose reads stopped read
+# "idle" (--- reads/min) for ever and the tile never said "stalled".
+# advance_throughput carries the last-progress time and the time the run
+# was first seen across ticks, outside the trimmed rate window.
+
+from nanometa_live.app.utils.throughput import advance_throughput  # noqa: E402
+
+
+def _drive(schedule, start=1000.0, tick_s=10.0):
+    """Feed (reads, running) per tick at tick_s; return the states."""
+    buf, states = {}, []
+    for i, (reads, running) in enumerate(schedule):
+        buf, state = advance_throughput(
+            buf, now=start + i * tick_s, total_reads=reads, total_files=0,
+            running=running)
+        states.append(state)
+    return buf, states
+
+
+def test_stall_is_reported_when_reads_stop_at_the_10s_cadence():
+    # 10 ticks of progress, then 30 ticks (300 s) with no new reads.
+    schedule = [(100 * i, True) for i in range(10)] + [(900, True)] * 30
+    _, states = _drive(schedule)
+    assert states[9] == "normal"
+    # Inside the threshold after the last progress: not yet a stall.
+    assert "stalled" not in states[10:20]
+    # Well past 120 s without progress: stalled, and it stays stalled.
+    assert set(states[-10:]) == {"stalled"}
+
+
+def test_stall_age_is_measured_from_the_last_progress():
+    schedule = [(100 * i, True) for i in range(10)] + [(900, True)] * 30
+    buf, _ = _drive(schedule)
+    # Last progress at tick 9 (t=1090); the final tick is t=1390.
+    assert buf["last_progress"] == pytest.approx(1090.0)
+
+
+def test_running_without_any_progress_stalls_after_the_threshold():
+    _, states = _drive([(0, True)] * 20)
+    assert states[5] != "stalled"
+    assert states[-1] == "stalled"
+
+
+def test_progress_resuming_clears_the_stall():
+    schedule = ([(100 * i, True) for i in range(5)] + [(400, True)] * 20
+                + [(500, True), (600, True)])
+    _, states = _drive(schedule)
+    assert states[-3] == "stalled"
+    assert states[-1] == "normal"
+
+
+def test_stop_resets_the_stall_clock():
+    schedule = [(0, True)] * 20 + [(0, False)] * 2 + [(0, True)] * 3
+    _, states = _drive(schedule)
+    assert states[19] == "stalled"
+    assert states[20] == "idle"
+    # A new run starts its own clock.
+    assert states[-1] != "stalled"

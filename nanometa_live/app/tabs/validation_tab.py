@@ -245,6 +245,7 @@ def register_validation_callbacks(app: Dash):
             total=len(blast_results),
             reads_validated=counts["reads_validated"],
             reads_total=counts["reads_total"],
+            failed=counts["failed"],
         )
 
     @app.callback(
@@ -569,6 +570,7 @@ def register_validation_callbacks(app: Dash):
             total=len(cov_results),
             reads_validated=counts["reads_validated"],
             reads_total=counts["reads_total"],
+            failed=counts["failed"],
         )
 
     @app.callback(

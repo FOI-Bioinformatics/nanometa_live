@@ -25,7 +25,7 @@ def nav_app():
 def test_welcome_modal_dismiss_routes_to_config(nav_app):
     fn = get_callback_fn(nav_app, "welcome-modal")
     with ctx_with("close-welcome-modal"):
-        is_open, tab = fn(True, 1)
+        is_open, tab = fn(True, 1, {})
     assert is_open is False
     assert tab == "config-tab"
 
@@ -33,10 +33,10 @@ def test_welcome_modal_dismiss_routes_to_config(nav_app):
 def test_welcome_modal_shows_on_first_visit(nav_app):
     fn = get_callback_fn(nav_app, "welcome-modal")
     with ctx_with("some-other-trigger"):
-        is_open, tab = fn(False, 0)   # not already shown -> show
+        is_open, tab = fn(False, 0, {})   # not already shown -> show
         assert is_open is True
         assert tab is no_update
-        is_open2, _ = fn(True, 0)     # already shown -> stay hidden
+        is_open2, _ = fn(True, 0, {})     # already shown -> stay hidden
         assert is_open2 is False
 
 

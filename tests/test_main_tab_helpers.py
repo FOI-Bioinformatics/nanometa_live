@@ -44,13 +44,24 @@ class TestBuildOrganismExport:
         assert build_organism_export(ORGANISM_ROWS, "csv", "")["filename"] == "organism_results.csv"
 
     def test_txt_report_structure(self):
-        out = build_organism_export(ORGANISM_ROWS, "txt", "run")
+        out = build_organism_export(ORGANISM_ROWS, "txt", "run",
+                                    total_reads=1800, sample="barcode01")
         assert out["filename"] == "run_report.txt"
         content = out["content"]
         assert "ORGANISM ANALYSIS REPORT" in content
-        assert "Total Organisms: 2" in content
-        assert "Total DNA Sequences: 2,000" in content  # 1500 + 500
+        assert "Sample: barcode01" in content
+        assert "Rows listed: 2" in content
+        # The sample's read total, not the table's reads summed across ranks
+        # (a genus row already contains its species: 1,500 + 500 counted
+        # the same reads twice; live test 2026-11-24).
+        assert "Total DNA Sequences: 1,800" in content
+        assert "2,000" not in content
+        assert "% = share of all reads" in content
         assert "Sp." in content and "Gen." in content  # rank abbreviations
+
+    def test_txt_report_without_a_total_says_so(self):
+        content = build_organism_export(ORGANISM_ROWS, "txt", "run")["content"]
+        assert "Total DNA Sequences: not available" in content
 
     def test_unknown_format_falls_back_to_csv(self):
         out = build_organism_export(ORGANISM_ROWS, "weird", "x")

@@ -1077,7 +1077,7 @@ def ReadStatisticsCard(
                 ]),
                 html.Small(
                     ("Good" if n50 >= 2000 else "Fair" if n50 >= 1000 else "Short")
-                    if n50 is not None else "Not available (FASTP mode)",
+                    if n50 is not None else "Not measured for this selection",
                     style={
                         "fontSize": "10px",
                         "fontWeight": "600" if n50 is not None else "400",

@@ -20,6 +20,8 @@ from nanometa_live.core.export.run_status import read_final_run_status
 from nanometa_live.core.utils.assembly_loader import (
     load_assembly_decisions, load_assembly_stats)
 from nanometa_live.core.export.report_charts import build_charts
+from nanometa_live.core.export.watchlist_screen import (
+    EntryRowResolver, resolve_mapping_collection, split_negative_controls)
 from nanometa_live.core.utils.attribution import is_negative_control
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.core.utils.qc_loaders import get_qc_stats
@@ -64,6 +66,14 @@ _DEFAULT_MAX_RAW_BYTES = 5 * 1024 ** 3  # 5 GiB
 # the raw tree is ever re-used. See the macOS bind-mount note in CLAUDE.md.
 _IGNORE_SIDECARS = shutil.ignore_patterns("._*", ".DS_Store")
 
+
+
+def _alert_threshold(entry: Any) -> int:
+    """The entry's own alert threshold, defaulting to 1 read."""
+    try:
+        return int(getattr(entry, "alert_threshold", 1) or 1)
+    except (TypeError, ValueError):
+        return 1
 
 
 def _order_and_label_by_threat(watched_results: List[Dict[str, Any]]) -> None:
@@ -353,7 +363,12 @@ class ReportGenerator:
         species = df[df["rank"].astype(str).str.strip().isin(wanted)].copy()
         if species.empty:
             return []
-        species = species.sort_values("reads", ascending=False).head(max_n)
+        # Sorted on the CLADE count, which is what the shown abundance
+        # measures: sorting on the per-rank ``reads`` column put
+        # *F. tularensis* at 60% of the run below *E. coli* at 2%, and off
+        # the end of head(20) (audit 2026-11-06, finding 21).
+        sort_col = "cumul_reads" if "cumul_reads" in species.columns else "reads"
+        species = species.sort_values(sort_col, ascending=False).head(max_n)
 
         if "%" in species.columns:
             abundance = species["%"].fillna(0).astype(float)
@@ -377,33 +392,11 @@ class ReportGenerator:
             })
         return results
 
-    def _match_entry_rows(
-        self,
-        df: pd.DataFrame,
-        match_id: Optional[int],
-        entry_name: Optional[str],
-    ) -> pd.DataFrame:
-        """Rows of *df* belonging to one watchlist entry.
-
-        Match by the Kraken2 database taxid (``db_taxid`` for GTDB/custom DBs,
-        else the NCBI taxid), then fall back to an exact name match -- the same
-        precedence the dashboard uses.
-        """
-        if df.empty:
-            return df
-        matched = (
-            df[df["taxid"] == match_id] if match_id else df.iloc[0:0]
-        )
-        if matched.empty and entry_name:
-            names_lower = df["name"].astype(str).str.strip().str.lower()
-            matched = df[names_lower == entry_name.strip().lower()]
-        return matched
-
     def _attribute_entry_to_samples(
         self,
         sample_frames: Dict[str, pd.DataFrame],
-        match_id: Optional[int],
-        entry_name: Optional[str],
+        resolver: EntryRowResolver,
+        entry: Any,
     ) -> List[Dict[str, Any]]:
         """Per-sample read counts for one watchlist entry, highest first.
 
@@ -417,7 +410,7 @@ class ReportGenerator:
         for sample, df in (sample_frames or {}).items():
             if df is None or df.empty:
                 continue
-            matched = self._match_entry_rows(df, match_id, entry_name)
+            matched = resolver.rows_for(df, entry)
             if matched.empty:
                 continue
             read_col = "cumul_reads" if "cumul_reads" in df.columns else "reads"
@@ -471,9 +464,19 @@ class ReportGenerator:
             total = classified + unclassified
             read_col = "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
 
-            for entry in active_entries.values():
+            # One resolver per screen: it carries the taxid mapping and a
+            # prebuilt matcher index (see core/export/watchlist_screen.py).
+            entries = list(active_entries.values())
+            resolver = EntryRowResolver(
+                entries,
+                [kraken_df, *(sample_frames or {}).values()],
+                resolve_mapping_collection(self.config),
+            )
+
+            for entry in entries:
                 row = self._screen_watchlist_entry(
                     entry, kraken_df, sample_frames, read_col, total,
+                    resolver,
                 )
                 if row is not None:
                     results.append(row)
@@ -490,6 +493,7 @@ class ReportGenerator:
         sample_frames: Optional[Dict[str, pd.DataFrame]],
         read_col: str,
         total: int,
+        resolver: EntryRowResolver,
     ) -> Optional[Dict[str, Any]]:
         """Screen ONE watchlist entry against ``kraken_df``; return its report
         row, or ``None`` on failure.
@@ -504,35 +508,16 @@ class ReportGenerator:
         try:
             threat = entry.threat_level
             threat_level = threat.value if hasattr(threat, "value") else str(threat)
+            threshold = _alert_threshold(entry)
 
-            match_id = getattr(entry, "db_taxid", None) or entry.taxid
-            matched = self._match_entry_rows(kraken_df, match_id, entry.name)
+            matched = resolver.rows_for(kraken_df, entry)
 
             reads = int(matched[read_col].sum()) if not matched.empty else 0
             abundance = (reads / total * 100) if total > 0 else 0
             per_sample = (
                 self._attribute_entry_to_samples(
-                    sample_frames, match_id, entry.name
+                    sample_frames, resolver, entry
                 ) if reads > 0 else []
-            )
-
-            # Negative controls are reported alongside a detection, never
-            # acted on: they are split out of the triggering list here, but
-            # a control-carried-only hit still shows as "detected" -- a
-            # contaminated control never makes a real aggregate positive
-            # disappear. Mirrors the dashboard's build_pathogen_attribution.
-            triggering_samples = [
-                s for s in per_sample if not s.get("is_negative_control")
-            ]
-            negative_control_rows = [
-                s for s in per_sample if s.get("is_negative_control")
-            ]
-            nc_reads = sum(s["reads"] for s in negative_control_rows)
-            positive_reads = sum(s["reads"] for s in triggering_samples)
-            nc_fraction = (
-                (nc_reads / positive_reads * 100)
-                if (negative_control_rows and positive_reads)
-                else None
             )
 
             return {
@@ -547,13 +532,14 @@ class ReportGenerator:
                 "reads": reads,
                 "abundance": round(abundance, 3),
                 "detected": reads > 0,
+                # Clears the ENTRY's own alert threshold, which is what
+                # decides ACTION REQUIRED on the dashboard; the banner
+                # alarmed on one read where the dashboard said MONITORING
+                # (finding 36). A below-threshold hit is still reported.
+                "above_threshold": reads >= threshold,
+                "alert_threshold": threshold,
                 "samples": per_sample,
-                "triggering_samples": triggering_samples,
-                "negative_control_rows": negative_control_rows,
-                "negative_control_fraction": nc_fraction,
-                "control_only": bool(
-                    negative_control_rows and not triggering_samples
-                ),
+                **split_negative_controls(per_sample),
             }
         except Exception:
             logger.exception(

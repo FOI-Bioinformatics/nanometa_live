@@ -27,6 +27,7 @@ from urllib.parse import quote
 import requests
 import urllib3
 
+from nanometa_live.core.utils.atomic_write import atomic_write_json
 from nanometa_live.core.utils.offline_cache import get_cache as get_offline_cache
 
 from nanometa_live.core.taxonomy.pseudo_taxid import PSEUDO_TAXID_BASE as _PSEUDO_TAXID_BASE
@@ -153,12 +154,17 @@ class TaxonomyCache:
                 logger.exception(f"Failed to load cache: {e}")
 
     def _save(self) -> None:
-        """Save cache to disk."""
+        """Save cache to disk, atomically.
+
+        Written on every resolved lookup, so a crash or a second process
+        reading mid-write is not hypothetical; a truncated cache loads as
+        empty and every name is re-queried, which in offline mode means it
+        cannot be resolved at all (audit 2026-11-06, finding 34).
+        """
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             self._data["last_updated"] = _utcnow().isoformat() + "Z"
-            with open(self.cache_file, "w", encoding="utf-8") as f:
-                json.dump(self._data, f, indent=2)
+            atomic_write_json(self.cache_file, self._data)
             logger.debug(f"Saved taxonomy cache: {self.cache_file}")
         except (FileNotFoundError, PermissionError, OSError, TypeError, ValueError) as e:
             logger.exception(f"Failed to save cache: {e}")
@@ -637,6 +643,15 @@ class NCBIClient(TaxonomyAPIClient):
             return []
 
         url = f"{self.BASE_URL}/efetch.fcgi"
+        # This method needs XML, so it issues its own request instead of
+        # going through _make_request -- and so it also has to honour the
+        # per-host circuit breaker itself. It did not, so with NCBI degraded
+        # every lineage call still paid the full timeout even after the
+        # breaker had opened for that host, and its failures never counted
+        # towards opening it (audit 2026-11-06, finding 37).
+        if self._circuit_is_open(url):
+            logger.debug("Circuit open for %s, skipping lineage fetch", url)
+            return []
         params = self._build_params({
             "db": "taxonomy",
             "id": str(taxid),
@@ -662,10 +677,17 @@ class NCBIClient(TaxonomyAPIClient):
                 names = re.findall(r"<ScientificName>([^<]+)</ScientificName>", lineage_section)
                 lineage = names
 
+            self._circuit_record_success(url)
             return lineage
 
-        except (requests.exceptions.RequestException, IndexError, AttributeError) as e:
+        except requests.exceptions.RequestException as e:
             logger.debug(f"Failed to get lineage for {taxid}: {e}")
+            self._circuit_record_failure(url, _classify_request_error(e))
+            return []
+        except (IndexError, AttributeError) as e:
+            # The response arrived; it just did not parse. That is not a
+            # host failure, so it must not count towards the breaker.
+            logger.debug(f"Failed to parse lineage for {taxid}: {e}")
             return []
 
     def validate_taxid(self, taxid: int) -> bool:

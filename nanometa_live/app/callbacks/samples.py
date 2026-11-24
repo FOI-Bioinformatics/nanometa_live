@@ -153,6 +153,9 @@ def _sample_state_badges(sample, dataless, progress):
                 f"preliminary {progress.done[sample]} of {progress.planned[sample]}",
                 color="info", className="ms-2",
                 title=(
+                    "The run ended before every chunk of this barcode "
+                    "was classified; the counts are partial."
+                    if progress.ended_early else
                     "More chunks of this barcode are still "
                     "classifying; the counts will grow."
                 ),
@@ -349,7 +352,9 @@ def register_samples(app, backend_manager):
         files land on disk; the interval input is a backstop to keep the
         age field current even on quiet outdirs.
         """
-        from nanometa_live.app.utils.freshness import freshness_map
+        from nanometa_live.app.utils.freshness import (
+            freshness_map_for_fingerprint,
+        )
 
         if not config or not available_samples:
             return {}
@@ -359,7 +364,10 @@ def register_samples(app, backend_manager):
         if not main_dir or not os.path.isdir(main_dir):
             return {}
         try:
-            return freshness_map(main_dir, available_samples)
+            # Reused while the fingerprint is unchanged: the callback still
+            # fires every tick (the pills' ages count from it), but a quiet
+            # tick no longer re-scans every batch_reports/ directory.
+            return freshness_map_for_fingerprint(main_dir, available_samples, _fp)
         except Exception as exc:
             log_callback_error("update_sample_freshness", exc, level=logging.WARNING)
             return {}

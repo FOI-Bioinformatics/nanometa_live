@@ -19,6 +19,8 @@ import yaml
 
 from nanometa_live.core.utils.kraken_utils import KRAKEN_REQUIRED_FILES
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
+from nanometa_live.core.workflow.pipeline_compat import NANOMETANF_MIN_VERSION
+from pathlib import Path
 
 pytestmark = pytest.mark.unit
 
@@ -534,7 +536,7 @@ class TestSetupPipelineFloor:
         m = NextflowManager(str(tmp_path), pipeline_source=f"local:{pipe}")
         ok, message = m.setup(self._config(tmp_path))
         assert ok is False
-        assert "1.4.1dev" in message and "1.11.0" in message
+        assert "1.4.1dev" in message and NANOMETANF_MIN_VERSION in message
 
     def test_refusal_happens_before_parameters_are_built(self, tmp_path):
         pipe = self._checkout(tmp_path, "1.4.1dev")
@@ -568,4 +570,61 @@ class TestSetupPipelineFloor:
             ok, message = m.setup(config_path)
 
         assert ok is True, message
-        assert any("1.11.0" in w for w in m.launch_warnings), m.launch_warnings
+        assert any(NANOMETANF_MIN_VERSION in w for w in m.launch_warnings), m.launch_warnings
+
+
+class TestSeedNextflowHome:
+    """Field audit 2026-10-28, H6: a fresh per-run NXF_HOME has no runtime jar,
+    and the get.nextflow.io launcher fetches it from the network -- on an
+    air-gapped machine, before any process runs. Start seeds the per-run
+    home from the launcher's cache under ~/.nextflow."""
+
+    def _home(self, tmp_path, monkeypatch, with_cache=True):
+        home = tmp_path / "home"; home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        if with_cache:
+            (home / ".nextflow" / "framework" / "26.04.0").mkdir(parents=True)
+            (home / ".nextflow" / "framework" / "26.04.0" / "nextflow-26.04.0-one.jar").write_bytes(b"jar")
+            (home / ".nextflow" / "capsule").mkdir()
+        return home
+
+    def test_links_framework_and_capsule_into_a_fresh_home(self, tmp_path, monkeypatch):
+        home = self._home(tmp_path, monkeypatch)
+        run_home = tmp_path / "results" / ".nextflow"
+        linked = NextflowManager._seed_nextflow_home(str(run_home))
+        assert sorted(linked) == ["capsule", "framework"]
+        assert (run_home / "framework").is_symlink()
+        assert (run_home / "framework" / "26.04.0" / "nextflow-26.04.0-one.jar").read_bytes() == b"jar"
+
+    def test_links_the_plugin_cache_too(self, tmp_path, monkeypatch):
+        # nf-schema 3.0.0 (2026-10-29): the plugin nanometanf pins is cached
+        # under ~/.nextflow/plugins; a per-run home without it re-downloads
+        # the plugin on every Start and cannot start offline.
+        home = self._home(tmp_path, monkeypatch)
+        plugin = home / ".nextflow" / "plugins" / "nf-schema-3.0.0"
+        plugin.mkdir(parents=True)
+        (plugin / "MANIFEST.MF").write_text("Plugin-Version: 3.0.0\n")
+        run_home = tmp_path / "results" / ".nextflow"
+        linked = NextflowManager._seed_nextflow_home(str(run_home))
+        assert sorted(linked) == ["capsule", "framework", "plugins"]
+        assert (run_home / "plugins" / "nf-schema-3.0.0" / "MANIFEST.MF").is_file()
+
+    def test_existing_entries_are_left_alone(self, tmp_path, monkeypatch):
+        self._home(tmp_path, monkeypatch)
+        run_home = tmp_path / "results" / ".nextflow"
+        (run_home / "framework").mkdir(parents=True)
+        linked = NextflowManager._seed_nextflow_home(str(run_home))
+        assert linked == ["capsule"]
+        assert not (run_home / "framework").is_symlink()
+
+    def test_no_launcher_cache_is_a_noop(self, tmp_path, monkeypatch):
+        self._home(tmp_path, monkeypatch, with_cache=False)
+        run_home = tmp_path / "results" / ".nextflow"
+        assert NextflowManager._seed_nextflow_home(str(run_home)) == []
+
+    def test_build_env_seeds_the_per_run_home(self, tmp_path, monkeypatch):
+        self._home(tmp_path, monkeypatch)
+        monkeypatch.delenv("NXF_HOME", raising=False)
+        results = tmp_path / "results"; results.mkdir()
+        env = NextflowManager._build_nextflow_env({"results_output_directory": str(results)})
+        assert (Path(env["NXF_HOME"]) / "framework").is_symlink()

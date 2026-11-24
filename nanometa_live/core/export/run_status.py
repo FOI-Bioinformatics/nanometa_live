@@ -12,7 +12,7 @@ banner, and a report over a stopped or still-active run must say so.
 
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 RUN_METADATA_FILENAME = ".nanometa.run.json"
 LOCK_FILENAME = ".nanometa.lock"
@@ -56,6 +56,71 @@ def read_lost_inputs(results_dir: str) -> List[Dict[str, Any]]:
             "input_files": [str(x) for x in files] if isinstance(files, list) else [],
         })
     return out
+
+
+PROCESSED_INPUTS_LEDGER = os.path.join("pipeline_info", "processed_inputs.tsv")
+_READ_EXTENSIONS = (".fastq", ".fastq.gz", ".fq", ".fq.gz")
+
+
+def count_unprocessed_inputs(results_dir: str, input_dir: str,
+                             started_at: Optional[str],
+                             max_file_age_minutes: Optional[float]) -> Optional[int]:
+    """Input read files in the watched folder that no run finished classifying.
+
+    nanometanf appends every input it finished classifying to
+    ``pipeline_info/processed_inputs.tsv`` (``source_file``, absolute path),
+    so the unprocessed inputs are the read files absent from it. Files older
+    than the start-up age filter (``max_file_age_minutes`` before
+    ``started_at``) were skipped on purpose and are not counted. Returns None
+    when there is no ledger (an older pipeline): the caller then has only the
+    inbox-minus-processed arithmetic, which also counts those skipped files
+    and files an earlier run classified.
+    """
+    ledger = os.path.join(results_dir or "", PROCESSED_INPUTS_LEDGER)
+    if not input_dir or not os.path.isfile(ledger):
+        return None
+    done = set()
+    try:
+        with open(ledger) as fh:
+            header = fh.readline().rstrip("\n").split("\t")
+            col = header.index("source_file") if "source_file" in header else 2
+            for line in fh:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) > col and parts[col]:
+                    done.add(os.path.realpath(parts[col]))
+    except OSError:
+        return None
+
+    cutoff = None
+    if max_file_age_minutes and started_at:
+        try:
+            from datetime import datetime
+            cutoff = (datetime.fromisoformat(started_at).timestamp()
+                      - float(max_file_age_minutes) * 60)
+        except (TypeError, ValueError):
+            cutoff = None
+
+    from nanometa_live.core.utils.auto_detect import find_sample_subdirs
+    dirs = [input_dir] + [str(d) for d in find_sample_subdirs(input_dir)]
+    count = 0
+    for d in dirs:
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(_READ_EXTENSIONS):
+                continue
+            path = os.path.join(d, name)
+            if cutoff is not None:
+                try:
+                    if os.stat(path).st_mtime < cutoff:
+                        continue
+                except OSError:
+                    continue
+            if os.path.realpath(path) not in done:
+                count += 1
+    return count
 
 
 def read_final_run_status(results_dir: str) -> Dict[str, Any]:
@@ -118,9 +183,15 @@ def read_final_run_status(results_dir: str) -> Dict[str, Any]:
     result["files_processed"] = int(fp) if isinstance(fp, (int, float)) else None
     inbox = meta.get("input_files_at_end")
     result["input_files_at_end"] = int(inbox) if isinstance(inbox, (int, float)) else None
-    # Input the run never classified (real-time: files that landed after the
-    # timer or the Stop). None when either count is unknown.
-    if result["files_processed"] is not None and result["input_files_at_end"] is not None:
+    # Input the run never classified. The count recorded from the
+    # pipeline's ledger is exact; without it, the inbox minus files_processed
+    # (which also counts files skipped by the age filter or classified by an
+    # earlier run). None when neither is known.
+    recorded = meta.get("unprocessed_input_files")
+    result["unprocessed_input_exact"] = isinstance(recorded, (int, float))
+    if isinstance(recorded, (int, float)):
+        result["unprocessed_input_files"] = int(recorded)
+    elif result["files_processed"] is not None and result["input_files_at_end"] is not None:
         result["unprocessed_input_files"] = max(
             0, result["input_files_at_end"] - result["files_processed"])
     else:

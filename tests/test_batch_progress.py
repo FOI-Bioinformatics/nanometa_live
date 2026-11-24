@@ -343,3 +343,100 @@ class TestProgressMemo:
         assert bp._progress_memo
         clear_all_loader_caches()
         assert not bp._progress_memo
+
+
+# -- The run's terminal state ---------------------------------------------
+#
+# A chunk whose reads QC removes entirely never reaches the classifier and
+# gets no per-batch report (nanometanf routes the sample through
+# EMIT_EMPTY_KRAKEN2_REPORT), so the plan is never matched on disk. Observed
+# live 2026-09-16: a completed five-barcode run read "preliminary: 1 of 5
+# barcodes still classifying" under a COMPLETE badge, and would have forever.
+
+
+def _run_json(root, final_status):
+    Path(root, ".nanometa.run.json").write_text(json.dumps(
+        {"written_at": "2026-09-16T09:12:00", "final_status": final_status}))
+
+
+class TestRunTerminalState:
+    def test_completed_run_counts_an_empty_chunk_as_complete(self, tmp_path):
+        from nanometa_live.app.utils import batch_progress as bp
+
+        bp.clear_batch_progress_memo()
+        root = _tree(tmp_path, {"barcode07": 6, "barcode08": 5},
+                     {"barcode07": [1, 2, 3, 4, 5], "barcode08": [0, 1, 2, 3, 4]})
+        _run_json(root, "completed")
+        p = bp.batch_progress(root)
+        assert p.run_state == "completed" and p.finished
+        assert p.preliminary == [] and p.pending == []
+        assert p.complete == ["barcode07", "barcode08"]
+        assert p.done["barcode07"] == 5  # the count itself is not rewritten
+        assert p.summary_line() == "Barcodes: 2 of 2 complete"
+
+    def test_completed_run_yields_no_verdict_clause(self, tmp_path):
+        from nanometa_live.app.utils import batch_progress as bp
+        from nanometa_live.app.tabs.dashboard_tab import _batch_progress_verdict_clause
+
+        bp.clear_batch_progress_memo()
+        root = _tree(tmp_path, {"barcode07": 6}, {"barcode07": [1, 2, 3, 4, 5]})
+        assert _batch_progress_verdict_clause(root) == (
+            "preliminary: 1 of 1 barcodes still classifying")
+        _run_json(root, "completed")
+        assert _batch_progress_verdict_clause(root) is None
+
+    @pytest.mark.parametrize("final", ["stopped", "error"])
+    def test_a_run_that_ended_early_is_partial_not_classifying(self, tmp_path, final):
+        """Nothing is classifying once the run is over, but the missing
+        chunks of a stopped run are genuinely missing, so the counts stay."""
+        from nanometa_live.app.utils import batch_progress as bp
+        from nanometa_live.app.tabs.dashboard_tab import _batch_progress_verdict_clause
+
+        bp.clear_batch_progress_memo()
+        root = _tree(tmp_path, {"barcode01": 4, "barcode02": 2},
+                     {"barcode01": [0, 1], "barcode02": [0, 1]})
+        _run_json(root, final)
+        p = bp.batch_progress(root)
+        assert p.ended_early and not p.finished
+        assert p.preliminary == ["barcode01"] and p.complete == ["barcode02"]
+        assert _batch_progress_verdict_clause(root) == (
+            "1 of 2 barcodes not fully classified")
+
+    def test_active_run_metadata_is_not_terminal(self, tmp_path):
+        from nanometa_live.app.utils import batch_progress as bp
+
+        bp.clear_batch_progress_memo()
+        root = _tree(tmp_path, {"barcode01": 4}, {"barcode01": [0, 1]})
+        Path(root, ".nanometa.run.json").write_text(json.dumps(
+            {"written_at": "2026-09-16T09:12:00"}))
+        p = bp.batch_progress(root)
+        assert p.run_state is None and p.preliminary == ["barcode01"]
+
+    def test_run_end_invalidates_the_memo(self, tmp_path):
+        """The memo keys on directory mtimes; a run ending changes none of
+        them, only the metadata file, which must therefore be part of the key."""
+        from nanometa_live.app.utils import batch_progress as bp
+
+        bp.clear_batch_progress_memo()
+        root = _tree(tmp_path, {"barcode07": 6}, {"barcode07": [1, 2, 3, 4, 5]})
+        assert bp.batch_progress(root).preliminary == ["barcode07"]
+        _run_json(root, "completed")
+        assert bp.batch_progress(root).preliminary == []
+
+    def test_selector_badge_names_the_early_end(self, tmp_path):
+        from tests.dash_test_utils import get_callback_fn, make_callback_app
+        from nanometa_live.app.callbacks.samples import register_samples
+        from nanometa_live.app.utils import batch_progress as bp
+
+        bp.clear_batch_progress_memo()
+        root = _tree(tmp_path, {"barcode01": 4}, {"barcode01": [0, 1]})
+        _run_json(root, "stopped")
+        app = make_callback_app(lambda a: register_samples(a, MagicMock()))
+        fn = get_callback_fn(app, "sample-selector", input_contains="available-samples")
+        options, _ = fn(["All Samples", "barcode01"], {}, "All Samples",
+                        {"barcode01": {"kraken2": ["x"]}},
+                        {"results_output_directory": root})
+        rendered = str(options)
+        assert "preliminary 2 of 4" in rendered
+        assert "run ended before every chunk" in rendered
+        assert "counts will grow" not in rendered

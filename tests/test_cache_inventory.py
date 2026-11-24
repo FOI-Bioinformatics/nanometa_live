@@ -36,6 +36,7 @@ WATCHED_MODULES = [
     "core/parsers/blast_validation_parser.py",
     "app/utils/organisms_memo.py",
     "app/utils/batch_progress.py",
+    "app/utils/freshness.py",
     "app/tabs/kraken2_helpers.py",
     "app/tabs/validation_tab_helpers.py",
 ]
@@ -45,6 +46,10 @@ WATCHED_MODULES = [
 COVERED_OR_EXEMPT = {
     # cleared by clear_data_cache / clear_all_loader_caches
     "_kraken_cache", "_fastp_cache", "_file_mtimes", "_parse_locks",
+    # sample_detector: both cleared by invalidate_sample_cache, which
+    # clear_all_loader_caches and instrument.reset_caches both call. The
+    # second name sat here for a year while nothing cleared it (audit
+    # 2026-11-06, 37); the reset test below now pins both.
     "_sample_cache", "_file_mapping_cache",
     # classification_loaders: cleared by clear_report_frame_cache
     "_report_frame_cache", "_last_good_frame", "_latest_batch_memo",
@@ -60,6 +65,7 @@ COVERED_OR_EXEMPT = {
     "_TAXONOMY_CACHE",   # kraken2_helpers (harness reset + single-DB evict)
     "_batch_ids_memo",   # validation_tab_helpers (dir-mtime keyed, bounded)
     "_progress_memo",    # batch_progress (clear_batch_progress_memo, both paths)
+    "_freshness_memo",   # freshness (clear_freshness_memo, both paths)
     # exempt: not caches
     "_saturation_warned",   # once-per-path warning dedup, tiny, harmless
     "_fallback_served_paths",  # classification_loaders: transience marker, cleared with the frame cache
@@ -95,8 +101,11 @@ class TestCacheInventory:
         from nanometa_live.core.utils import classification_loaders as cl
         from nanometa_live.core.utils import seqkit_batch_cache as sbc
         from nanometa_live.core.utils import report_accumulation as ra
+        from nanometa_live.core.utils import sample_detector as sd
 
         loader_utils._kraken_cache["k"] = (0.0, None)
+        sd._sample_cache["d"] = ((), [])
+        sd._file_mapping_cache["d"] = ((), {})
         cl._report_frame_cache[("p", 1, 1)] = None
         cl._frame_sizes[("p", 1, 1)] = 1
         sbc._cache[("p", 1, 1)] = None
@@ -106,3 +115,7 @@ class TestCacheInventory:
         assert not cl._report_frame_cache and not cl._frame_sizes
         assert not sbc._cache
         assert not ra._sample_accum
+        assert not sd._sample_cache
+        assert not sd._file_mapping_cache, (
+            "the inventory lists _file_mapping_cache as cleared at a run "
+            "boundary; it must actually be cleared")

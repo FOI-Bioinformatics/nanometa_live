@@ -201,7 +201,12 @@ def _qc_per_sample_table():
                             {
                                 "headerName": "Avg. Q score",
                                 "field": "mean_quality",
-                                "headerTooltip": "Mean Phred quality per read. Source: SeqKit",
+                                "headerTooltip": (
+                                    "Mean read quality (Phred), from SeqKit or NanoPlot. "
+                                    "Blank when not measured: fastp reports no mean read "
+                                    "quality, and a sample with no reads has none."
+                                ),
+                                "valueFormatter": {"function": "params.value == null ? '--' : params.value"},
                                 "minWidth": 120,
                                 "cellStyle": {
                                     "styleConditions": [

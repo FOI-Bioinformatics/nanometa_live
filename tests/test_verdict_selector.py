@@ -89,6 +89,22 @@ class TestActionRequired:
         assert "2 of 9 watched pathogens above alert threshold" in d.subtitle
         assert "pending confirmatory validation" in d.subtitle
 
+    def test_subtitle_count_matches_the_named_pathogens(self):
+        """The count must describe the list printed under it.
+
+        The banner names critical and high hits only ("Above threshold:"),
+        but the count included moderate-tier hits, so a banner could read
+        "3 of ..." above one named organism. Moderate hits are counted
+        separately.
+        """
+        d = verdict(dangerous=[{"threat_level": "critical"},
+                               {"threat_level": "moderate"},
+                               {"threat_level": "moderate"}],
+                    n_watched=9, validation_has_results=True)
+        assert d.subtitle.startswith(
+            "1 of 9 watched pathogens above alert threshold")
+        assert "2 moderate-risk" in d.subtitle
+
     def test_subtitle_omits_note_when_validated(self):
         d = verdict(dangerous=[{"threat_level": "critical"}],
                     validation_has_results=True)
@@ -482,3 +498,42 @@ class TestErrorOutranksStarting:
     def test_starting_without_error_is_still_screening(self):
         d = verdict(overall_status_starting=True)
         assert d.state == "SCREENING"
+
+
+class TestLoadFailed:
+    """A loader exception is RESULTS UNREADABLE, not STANDBY (field audit
+    2026-10-28, M1). The callback used to catch the exception, set
+    main_dir_available False and fall through to the grey "start an
+    analysis" state -- while the pipeline was running and writing."""
+
+    def test_load_failure_is_not_standby(self):
+        d = verdict(load_failed=True, load_error="ValueError: bad row",
+                    kraken_has_data=False)
+        assert d.state == "RESULTS_UNREADABLE"
+        assert "bad row" in d.subtitle
+        assert d.bg_color not in ("#d4edda", "#f8f9fa")
+
+    def test_load_failure_while_running_is_still_unreadable(self):
+        d = verdict(load_failed=True, kraken_has_data=False, pipeline_running=True)
+        assert d.state == "RESULTS_UNREADABLE"
+
+    def test_lost_directory_outranks_it(self):
+        d = verdict(load_failed=True, results_dir_lost=True,
+                    main_dir_available=False, kraken_has_data=False)
+        assert d.state == "RESULTS_UNAVAILABLE"
+
+    def test_pipeline_error_outranks_it(self):
+        d = verdict(load_failed=True, pipeline_error=True, kraken_has_data=False)
+        assert d.state == "PIPELINE_ERROR"
+
+    def test_data_that_did_load_keeps_its_verdict(self):
+        # The flag only matters on the no-data tail.
+        d = verdict(load_failed=True)
+        assert d.state == "ALL_CLEAR"
+
+
+class TestDiskLowClause:
+    def test_clause_reaches_the_subtitle(self):
+        d = verdict(disk_low="only 1.2 GB free on the results volume - new output may be truncated or lost")
+        assert d.state == "ALL_CLEAR"
+        assert "1.2 GB free" in d.subtitle

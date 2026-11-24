@@ -445,12 +445,23 @@ def _format_criteria_text(config):
     identity = f"{ValidationParser.MIN_IDENTITY_THRESHOLD:.0f}%"
     partial = f"{ValidationParser.PARTIAL_THRESHOLD:.0f}%"
 
+    from nanometa_live.core.parsers.blast_validation_parser import (
+        MIN_BREADTH_FOR_CONFIRMED, MIN_READS_FOR_CONFIRMED,
+    )
+    # Every rule determine_status applies, so a Partial beside a high hit
+    # rate has a stated reason; MAPQ is a counting filter in the pipeline,
+    # not a status rule (an organism at average MAPQ 3 read as if it had to
+    # clear it).
     return (
-        f"Confirmed: hit rate >= {confirmed} of classified reads "
-        f"AND mean identity >= {identity}. "
+        f"Confirmed: hit rate >= {confirmed} of classified reads, "
+        f"mean identity >= {identity} and at least "
+        f"{MIN_READS_FOR_CONFIRMED} validated reads; coverage results must "
+        f"also cover at least {MIN_BREADTH_FOR_CONFIRMED * 100:.0f}% of the "
+        f"reference genome (focused, amplicon-like coverage excepted). "
         f"Partial: hit rate >= {partial}. "
         f"Low Confidence: below that. "
-        f"Minimap2 also requires alignment MAPQ >= {mapq_str}."
+        f"Minimap2 alignments with MAPQ >= {mapq_str} are counted "
+        f"(pipeline setting minimap2_min_mapq)."
     )
 
 
@@ -468,6 +479,7 @@ def _compute_summary(results):
             "partial": int,
             "low_confidence": int,
             "no_data": int,
+            "failed": int,
             "reads_validated": int,
             "reads_total": int,
         }``
@@ -477,6 +489,7 @@ def _compute_summary(results):
         "partial": 0,
         "low_confidence": 0,
         "no_data": 0,
+        "failed": 0,
         "reads_validated": 0,
         "reads_total": 0,
     }
@@ -488,6 +501,10 @@ def _compute_summary(results):
             counts["partial"] += 1
         elif status in ("low", "uncertain", "rejected"):
             counts["low_confidence"] += 1
+        elif status == "failed":
+            # The validation process failed (tool crash, unreadable output):
+            # not the same as "not checked", which is what No Data says.
+            counts["failed"] += 1
         else:
             counts["no_data"] += 1
         try:

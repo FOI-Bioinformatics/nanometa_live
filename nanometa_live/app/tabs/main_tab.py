@@ -64,6 +64,8 @@ from nanometa_live.app.tabs.main_tab_helpers import (  # noqa: E402
     render_validation_results_card,
     validation_store_entry,
     not_detected_caveat,
+    count_organisms_found,
+    resolve_min_abundance,
 )
 from nanometa_live.app.tabs.dashboard_helpers import (  # noqa: E402
     DEFAULT_LOW_READ_FLOOR,
@@ -316,6 +318,10 @@ def register_main_callbacks(app: Dash):
             # mode emits one fingerprint advance per chunk file).
             State("dashboard-overall-status-cache", "data"),
             State("main-results-rendered-fp", "data"),
+            # The worker's WatchlistManager singleton is empty; threat
+            # levels and database taxids for the watched cards come from
+            # the main process through this Store.
+            State("watchlist-entries-snapshot", "data"),
         ],
         prevent_initial_call=True,
         # Audit item #3 (docs/audit/threading-2026-05-10.md): heavy kraken
@@ -331,7 +337,7 @@ def register_main_callbacks(app: Dash):
     def update_main_results(
         _due, _fingerprint, apply_clicks, selected_sample, watchlist_store,
         top_count, min_abundance, tax_ranks, config, status,
-        overall_status_cache, rendered_fp,
+        overall_status_cache, rendered_fp, entries_snapshot=None,
     ):
         """
         Update the main results tab with organism summary, cards, table,
@@ -385,7 +391,7 @@ def register_main_callbacks(app: Dash):
 
         # Set filter defaults
         top_count = top_count or 10
-        min_abundance = min_abundance or 0.1
+        min_abundance = resolve_min_abundance(min_abundance)
         tax_ranks = tax_ranks or ["S", "G"]
 
         # Background-callback isolation: the DiskcacheManager worker is a
@@ -396,7 +402,8 @@ def register_main_callbacks(app: Dash):
         # get_watchlist_manager(). The store data shape mirrors the prior
         # singleton output, so downstream code is unchanged.
         watchlist = [
-            {"taxid": e.get("taxid"), "name": e.get("name")}
+            {"taxid": e.get("taxid"), "name": e.get("name"),
+             "db_taxid": e.get("db_taxid")}
             for e in (watchlist_store or [])
             if e.get("taxid") is not None and e.get("name")
         ]
@@ -453,11 +460,9 @@ def register_main_callbacks(app: Dash):
             # which is consistent with the abundance percentage shown on each card.
             filtered_df = filtered_df.sort_values('cumul_reads', ascending=False).head(top_count)
 
-            # Count unique organisms at species/genus level
-            species_df = kraken_df[kraken_df['rank'].isin(['S', 'G'])]
-            species_df = species_df[species_df['taxid'] > 1]
-            species_df = species_df[species_df['reads'] > 0]
-            total_organisms = len(species_df)
+            # Species with reads plus genus-only identifications, on
+            # cumulative reads (see count_organisms_found).
+            total_organisms = count_organisms_found(kraken_df)
 
             # Find most abundant organism
             most_abundant = None
@@ -477,10 +482,12 @@ def register_main_callbacks(app: Dash):
             )
 
             # Check for watched species in the data (detected only - for alert)
-            detected_watched = filter_detected_species(kraken_df, watchlist)
+            detected_watched = filter_detected_species(
+                kraken_df, watchlist, entries_snapshot=entries_snapshot)
 
             # Get ALL watchlist entries with detection status (for display)
-            all_watchlist_species = get_all_watchlist_with_detection(kraken_df, watchlist)
+            all_watchlist_species = get_all_watchlist_with_detection(
+                kraken_df, watchlist, entries_snapshot=entries_snapshot)
 
             # Create alert banner if watched species detected
             alert_banner = None
@@ -931,17 +938,31 @@ def register_main_callbacks(app: Dash):
             State("export-filename", "value"),
             State("detailed-organism-table", "rowData"),
             State("app-config", "data"),
+            State("selected-sample", "data"),
         ],
         prevent_initial_call=True,
     )
-    def export_organism_data(n_clicks, export_format, filename, table_data, config):
+    def export_organism_data(n_clicks, export_format, filename, table_data, config,
+                             selected_sample=None):
         """Export organism data to file."""
         if not n_clicks or not table_data:
             return no_update
 
         try:
+            # The sample's own read total (classified + unclassified), as on
+            # the Dashboard tile; the table cannot give one.
+            total_reads = None
+            main_dir = resolve_outdir_for_fingerprint(config)
+            if main_dir:
+                from nanometa_live.app.utils.callback_helpers import get_classification_stats
+                kdf = load_kraken_data(main_dir, selected_sample or "All Samples")
+                if not kdf.empty:
+                    c, u, _ = get_classification_stats(kdf)
+                    total_reads = c + u or None
             # Export payload construction is a pure function in main_tab_helpers.
-            return build_organism_export(table_data, export_format, filename)
+            return build_organism_export(table_data, export_format, filename,
+                                         total_reads=total_reads,
+                                         sample=selected_sample)
 
         except Exception as e:
             logging.error(f"Error exporting data: {e}")

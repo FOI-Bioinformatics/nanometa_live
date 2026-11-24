@@ -653,12 +653,21 @@ class TestBackendManagerFileCountTTL:
         # check below treats it as expired.
         bm._file_count_cached_at = bm._file_count_cached_at - bm._FILE_COUNT_TTL_SECONDS - 1
 
-        listdir_calls = []
+        # An expired TTL consults the filesystem again. An unchanged
+        # directory is checked by its own mtime (one stat) rather than
+        # re-listed, so count both kinds of access.
+        fs_calls = []
         original_listdir = os.listdir
+        original_stat = os.stat
         def counting_listdir(p):
-            listdir_calls.append(str(p))
+            fs_calls.append(str(p))
             return original_listdir(p)
+        def counting_stat(p, *a, **kw):
+            fs_calls.append(str(p))
+            return original_stat(p, *a, **kw)
         monkeypatch.setattr(os, "listdir", counting_listdir)
+        monkeypatch.setattr(os, "stat", counting_stat)
 
         bm._update_file_counts()
-        assert len(listdir_calls) >= 1, "expired TTL must trigger a fresh scan"
+        assert any(str(nanopore_dir) in c for c in fs_calls), (
+            "expired TTL must trigger a fresh scan")

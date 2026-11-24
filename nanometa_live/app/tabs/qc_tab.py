@@ -25,6 +25,7 @@ from nanometa_live.core.utils.qc_loaders import (
     load_fastp_card_payloads,
     load_fastp_data,
     load_seqkit_stats,
+    summarize_seqkit_rows,
 )
 from nanometa_live.app.components.organism_components import (
     BaseQualityCard,
@@ -56,6 +57,9 @@ from nanometa_live.app.tabs.qc_tab_helpers import (  # noqa: E402
     compute_qc_stat_lines,
     build_qc_figures,
     aggregate_fastp_read_stats,
+    qc_guidance_issues,
+    seqkit_plot_rows,
+    fastp_quality_rates,
 )
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 
@@ -160,20 +164,7 @@ def register_qc_callbacks(app: Dash):
             if not sample_data and os.path.exists(seqkit_dir):
                 seqkit_df = load_seqkit_stats(main_dir)
                 if not seqkit_df.empty and 'num_seqs' in seqkit_df.columns:
-                    for _, row in seqkit_df.iterrows():
-                        sample_name = row.get('file', 'unknown')
-                        if isinstance(sample_name, str):
-                            sample_name = os.path.basename(sample_name).split('.')[0]
-                        reads = int(row.get('num_seqs', 0))
-                        bases = int(row.get('sum_len', 0))
-
-                        if reads > 0:
-                            sample_data.append({
-                                "Sample": str(sample_name),
-                                "Time": datetime.now(),  # No mtime available
-                                "Reads": reads,
-                                "Bp": bases
-                            })
+                    sample_data.extend(seqkit_plot_rows(seqkit_df, seqkit_dir))
 
             # Last resort: use Kraken2 reports.
             #
@@ -309,7 +300,7 @@ def register_qc_callbacks(app: Dash):
 
         # Default values for when no data is available
         default_values = [
-            "Raw reads (pre-Chopper): \u2014",
+            "Raw reads (before filtering): \u2014",
             "Reads that passed filtering: 0",
             "Total reads removed: 0",
             "Too low quality: 0 (0%)",
@@ -391,26 +382,13 @@ def register_qc_callbacks(app: Dash):
                     seqkit_df = load_seqkit_stats(main_dir, selected_sample)
                     if not seqkit_df.empty and 'num_seqs' in seqkit_df.columns:
                         tot_passed_reads = int(seqkit_df['num_seqs'].sum())
-                        # Use Kraken2 for pre-filter baseline (total classified + unclassified)
-                        # This ensures consistent data source with seqkit post-filter reads
-                        kraken_df = load_kraken_data(main_dir, selected_sample)
-                        if not kraken_df.empty:
-                            root = kraken_df[kraken_df['name'].str.strip() == 'root']
-                            unclassified = kraken_df[kraken_df['name'].str.strip() == 'unclassified']
-                            classified_total = int(root.iloc[0]['cumul_reads']) if not root.empty else 0
-                            unclassified_total = int(unclassified.iloc[0]['cumul_reads']) if not unclassified.empty else 0
-                            tot_reads_pre_filt = classified_total + unclassified_total
-
-                            # Chopper does not produce a per-category breakdown
-                            # of removed reads. The proportions below are rough
-                            # estimates only and are labelled as such in the UI.
-                            if tot_reads_pre_filt > 0:
-                                tot_removed_reads = max(0, tot_reads_pre_filt - tot_passed_reads)
-                                # Approximate distribution: 60% quality, 30% length, 10% complexity
-                                tot_low_quality_reads = int(tot_removed_reads * 0.6)
-                                tot_too_short_reads = int(tot_removed_reads * 0.3)
-                                tot_too_many_N_reads = tot_removed_reads - tot_low_quality_reads - tot_too_short_reads
-                                chopper_estimated = True
+                        # No pre-filter count exists for chopper/filtlong:
+                        # seqkit runs on the filtered reads and Kraken2
+                        # classifies the same filtered reads, so neither is
+                        # a "raw" count. Using the Kraken2 total made every
+                        # run "pass 100%" and the removal breakdown a fixed
+                        # 60/30/10 split; the lines now say "not recorded".
+                        tot_reads_pre_filt = 0
 
             # Get classification stats from Kraken2 (sample-filtered)
             classified_reads = 0
@@ -450,7 +428,7 @@ def register_qc_callbacks(app: Dash):
             logging.error(f"Error updating QC stats: {e}")
             # Return default values on error
             return [
-                f"Raw reads (pre-Chopper): error ({str(e)})",
+                f"Raw reads (before filtering): error ({str(e)})",
                 "Reads that passed filtering: 0",
                 "Total reads removed: 0",
                 "Too low quality: 0 (0%)",
@@ -598,13 +576,13 @@ def register_qc_callbacks(app: Dash):
         ],
     )
     def update_per_sample_table(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
-        if active_tab != "qc-tab":
-            raise PreventUpdate
         """
         Update the per-sample breakdown table with statistics for each barcode.
 
         This table shows individual stats for each detected sample/barcode.
         """
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         if interval_tick_is_redundant(ctx, "qc_per_sample_table", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_per_sample_table", _fingerprint)
@@ -647,8 +625,6 @@ def register_qc_callbacks(app: Dash):
         ],
     )
     def update_base_quality_card(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
-        if active_tab != "qc-tab":
-            raise PreventUpdate
         """
         Update the base quality card showing Q20/Q30 rates and optional sparkline.
 
@@ -656,6 +632,8 @@ def register_qc_callbacks(app: Dash):
         - FASTP: q20_bases, q30_bases, total_bases, quality_curves
         - Seqkit (Chopper): Q20(%), Q30(%), sum_len
         """
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         if interval_tick_is_redundant(ctx, "qc_base_quality", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_base_quality", _fingerprint)
@@ -692,39 +670,27 @@ def register_qc_callbacks(app: Dash):
                     main_dir, selected_sample)
                 if fastp_payloads:
                     source = "fastp"
-                    total_q20_bases = 0
-                    total_q30_bases = 0
-                    saw_quality_fields = False
-
+                    rates = fastp_quality_rates(fastp_payloads)
+                    total_bases = rates["total_bases"]
+                    q20_rate, q30_rate = rates["q20"], rates["q30"]
                     for fastp_data in fastp_payloads:
-                        after = fastp_data.get("summary", {}).get("after_filtering", {})
-                        total_bases += after.get("total_bases", 0)
-                        if "q20_bases" in after or "q30_bases" in after:
-                            saw_quality_fields = True
-                        total_q20_bases += after.get("q20_bases", 0)
-                        total_q30_bases += after.get("q30_bases", 0)
-
                         # Get quality curve (use first file's curve)
-                        if not quality_curve:
-                            read1_after = fastp_data.get("read1_after_filtering", {})
-                            curve = read1_after.get("quality_curves", {}).get("mean", [])
-                            if curve:
-                                quality_curve = curve
-
-                    if total_bases > 0 and saw_quality_fields:
-                        q20_rate = (total_q20_bases / total_bases) * 100
-                        q30_rate = (total_q30_bases / total_bases) * 100
+                        read1_after = fastp_data.get("read1_after_filtering", {})
+                        curve = read1_after.get("quality_curves", {}).get("mean", [])
+                        if curve:
+                            quality_curve = curve
+                            break
 
             # Fallback to seqkit if no FASTP data
             if total_bases == 0:
                 seqkit_df = load_seqkit_stats(main_dir, selected_sample)
                 if not seqkit_df.empty:
                     source = "seqkit"
-                    total_bases = int(seqkit_df['sum_len'].sum()) if 'sum_len' in seqkit_df.columns else 0
-                    if 'Q20(%)' in seqkit_df.columns:
-                        q20_rate = float(seqkit_df['Q20(%)'].mean())
-                    if 'Q30(%)' in seqkit_df.columns:
-                        q30_rate = float(seqkit_df['Q30(%)'].mean())
+                    # Base-weighted over samples (a plain mean let a 10-read
+                    # sample count as much as a 1,000-read one).
+                    pooled = summarize_seqkit_rows(seqkit_df)
+                    total_bases = pooled["total_bases"]
+                    q20_rate, q30_rate = pooled["q20_percent"], pooled["q30_percent"]
 
             # If no data, show empty state
             if total_bases == 0:
@@ -768,8 +734,6 @@ def register_qc_callbacks(app: Dash):
         ],
     )
     def update_read_statistics_card(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
-        if active_tab != "qc-tab":
-            raise PreventUpdate
         """
         Update the read statistics card showing mean length, N50, and GC content.
 
@@ -777,6 +741,8 @@ def register_qc_callbacks(app: Dash):
         - FASTP: read1_mean_length (before/after), gc_content
         - Seqkit (Chopper): avg_len, N50, GC(%)
         """
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         if interval_tick_is_redundant(ctx, "qc_read_stats", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_read_stats", _fingerprint)
@@ -822,9 +788,9 @@ def register_qc_callbacks(app: Dash):
                 seqkit_df = load_seqkit_stats(main_dir, selected_sample)
                 if not seqkit_df.empty:
                     source = "seqkit"
-                    mean_length = float(seqkit_df['avg_len'].mean()) if 'avg_len' in seqkit_df.columns else 0.0
-                    n50 = int(seqkit_df['N50'].mean()) if 'N50' in seqkit_df.columns else None
-                    gc_content = float(seqkit_df['GC(%)'].mean()) if 'GC(%)' in seqkit_df.columns else None
+                    summary = summarize_seqkit_rows(seqkit_df)  # n50 None if pooled
+                    mean_length, n50, gc_content = (
+                        summary["mean_length"], summary["n50"], summary["gc_percent"])
 
             # If no data, show empty state
             if mean_length == 0:
@@ -973,29 +939,35 @@ def register_qc_callbacks(app: Dash):
                     "metric": "Pass Rate (%)",
                     "value": f"{min(rate, 100.0):.1f}",
                 })
-                rows.append({
-                    "metric": "Q20 Rate (%)",
-                    "value": fastp_data.get("q20_rate", "N/A"),
-                })
-                rows.append({
-                    "metric": "Q30 Rate (%)",
-                    "value": fastp_data.get("q30_rate", "N/A"),
-                })
-                rows.append({
-                    "metric": "GC Content (%)",
-                    "value": fastp_data.get("gc_content", "N/A"),
-                })
+                # The card's computation: the loader's flat dict carries no
+                # q20/q30/gc keys, so the export wrote "N/A" beside the card.
+                rates = fastp_quality_rates(load_fastp_card_payloads(main_dir, selected_sample))
+                for label, key in (("Q20 Rate (%)", "q20"), ("Q30 Rate (%)", "q30"),
+                                   ("GC Content (%)", "gc")):
+                    rows.append({
+                        "metric": label,
+                        "value": f"{rates[key]:.1f}" if rates[key] is not None else "not recorded",
+                    })
 
             if not seqkit_data.empty:
                 rows.append({
                     "metric": "SeqKit Total Sequences",
                     "value": int(seqkit_data["num_seqs"].sum()) if "num_seqs" in seqkit_data.columns else "N/A",
                 })
+                pooled = summarize_seqkit_rows(seqkit_data)
                 if "avg_len" in seqkit_data.columns:
                     rows.append({
                         "metric": "Average Read Length",
-                        "value": f"{seqkit_data['avg_len'].mean():.0f}",
+                        "value": f"{pooled['mean_length']:.0f}",
                     })
+                for label, key in (("Mean Read Quality (Phred)", "mean_quality"),
+                                   ("Q20 Rate (%)", "q20_percent"),
+                                   ("Q30 Rate (%)", "q30_percent"),
+                                   ("GC Content (%)", "gc_percent"),
+                                   ("Read Length N50", "n50")):
+                    if pooled.get(key) is not None:
+                        rows.append({"metric": label, "value": f"{pooled[key]:.1f}"
+                                     if isinstance(pooled[key], float) else pooled[key]})
 
             if not rows:
                 return no_update
@@ -1060,52 +1032,25 @@ def register_qc_callbacks(app: Dash):
             kraken_df = load_kraken_data(main_dir, selected_sample)
 
             if tot_passed_reads == 0:
+                # Filtered read count only: chopper/filtlong record no
+                # pre-filter count, and Kraken2 classifies FILTERED reads.
                 seqkit_data = load_seqkit_stats(main_dir, selected_sample)
                 if not seqkit_data.empty and "num_seqs" in seqkit_data.columns:
                     tot_passed_reads = int(seqkit_data["num_seqs"].sum())
-                    if not kraken_df.empty:
-                        c, u, _ = get_classification_stats(kraken_df)
-                        tot_reads_pre_filt = c + u
 
             if not kraken_df.empty:
                 classified_reads, unclassified_reads, _ = get_classification_stats(kraken_df)
                 total_kraken_reads = classified_reads + unclassified_reads
 
-            if tot_reads_pre_filt == 0 and total_kraken_reads == 0:
+            if tot_reads_pre_filt == 0 and tot_passed_reads == 0 and total_kraken_reads == 0:
                 return ""
 
-            pass_rate = min(
-                (tot_passed_reads / tot_reads_pre_filt * 100) if tot_reads_pre_filt > 0 else 0,
-                100.0,
+            issues, is_action = qc_guidance_issues(
+                pre_filter=tot_reads_pre_filt or None,
+                passed=tot_passed_reads,
+                classified=classified_reads,
+                total_classified_input=total_kraken_reads,
             )
-            classification_rate = (
-                (classified_reads / total_kraken_reads * 100) if total_kraken_reads > 0 else 0
-            )
-
-            # Determine guidance level and message
-            issues = []
-            if pass_rate < 60:
-                issues.append(
-                    "Pass rate is below 60% - consider checking flow cell health "
-                    "and sample quality. Re-sequencing may be needed for reliable results."
-                )
-            elif pass_rate < 75:
-                issues.append(
-                    "Pass rate is moderate. Results are usable but quality could be improved."
-                )
-
-            if classification_rate < 40 and total_kraken_reads > 100:
-                issues.append(
-                    "Less than 40% of sequences could be identified. This may indicate "
-                    "the sample contains organisms not in the database, or that sequencing "
-                    "quality is limiting identification."
-                )
-
-            if tot_reads_pre_filt < 1000 and tot_reads_pre_filt > 0:
-                issues.append(
-                    "Fewer than 1,000 total sequences. Continue sequencing for "
-                    "more reliable results, especially for low-abundance organisms."
-                )
 
             # Render guidance with the locked WCAG AA token pairs
             # (matches Stage Strip delta + AgGrid cell colors).
@@ -1128,7 +1073,7 @@ def register_qc_callbacks(app: Dash):
                 )
 
             if not issues:
-                if tot_reads_pre_filt > 0:
+                if tot_reads_pre_filt > 0 or tot_passed_reads > 0 or total_kraken_reads > 0:
                     return _guidance_box(
                         bg="#d4edda", fg="#155724", accent="#155724",
                         icon="check-circle-fill",
@@ -1139,7 +1084,6 @@ def register_qc_callbacks(app: Dash):
                     )
                 return ""
 
-            is_action = pass_rate < 60 or classification_rate < 40
             if is_action:
                 bg, fg, accent, icon = "#f8d7da", "#721c24", "#721c24", "exclamation-octagon-fill"
                 lead = "Action needed: "

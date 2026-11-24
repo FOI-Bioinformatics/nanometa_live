@@ -577,6 +577,28 @@ class TestCardComponentsDirectly:
             "on-card signal of evidence strength"
         )
 
+    @pytest.mark.parametrize("label,value,color", [
+        ("HIGH", 100, "success"),
+        ("MODERATE", 60, "warning"),
+        ("LOW", 25, "danger"),
+    ])
+    def test_certainty_bar_follows_the_label(self, label, value, color):
+        """MODERATE is the label the panel passes; the bar tested for the
+        word MEDIUM, so a moderate card drew the red 25% bar of LOW."""
+        import dash_bootstrap_components as dbc
+        card = CriticalPathogenAlert("X", read_count=50, confidence=label)
+        bars = [n for n in _walk(card) if isinstance(n, dbc.Progress)]
+        assert [(b.value, b.color) for b in bars] == [(value, color)]
+
+    @pytest.mark.parametrize("reads,expected", [
+        (5, "LOW"), (20, "MODERATE"), (99, "MODERATE"), (100, "HIGH"),
+    ])
+    def test_panel_confidence_uses_the_report_bands(self, reads, expected):
+        """The card and the Pathogen Report modal must give one detection
+        one confidence. The panel used HIGH >= 100 else MODERATE, the modal
+        compute_detection_confidence (High >= 100, Moderate >= 20, Low)."""
+        assert dashboard_helpers._card_confidence(reads) == expected
+
 
 def _write_report(path: str, rows: List[str]) -> None:
     """Write a Kraken2 report and back-date it past the loader stability check."""
