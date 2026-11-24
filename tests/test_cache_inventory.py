@@ -57,7 +57,7 @@ COVERED_OR_EXEMPT = {
     "_frame_sizes", "_last_good_sizes",
     # round-3 modules with their own registered clear functions
     "_cache",            # seqkit_batch_cache
-    "_counts_cache",     # chopper_counts (clear_chopper_counts_cache, both paths)
+    "_counts_cache", "_sample_memo",  # chopper_counts (clear_chopper_counts_cache, both paths)
     "_sample_accum",     # report_accumulation
     "_serving_since", "_last_warned",   # staleness
     "_breadth_cache",    # paf_coverage_parser (harness reset)

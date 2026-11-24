@@ -110,3 +110,46 @@ def test_perf_harness_reset_clears_it(tmp_path):
     assert cc._counts_cache
     reset_caches()
     assert not cc._counts_cache
+
+
+def test_unchanged_sample_directory_reads_no_file(tmp_path, monkeypatch):
+    """A quiet poll costs one stat per sample, not one per batch file
+    (final review: the file count grows with barcodes x batches)."""
+    for i in range(5):
+        _write(tmp_path, "barcode01", str(i), "Kept 8 reads out of 10 reads\n")
+    assert load_chopper_counts(str(tmp_path), None) == ChopperCounts(50, 40, 5)
+    calls = []
+    real = cc._read_counts
+    monkeypatch.setattr(cc, "_read_counts", lambda p: calls.append(p) or real(p))
+    assert load_chopper_counts(str(tmp_path), None) == ChopperCounts(50, 40, 5)
+    assert load_chopper_counts(str(tmp_path), "barcode01") == ChopperCounts(50, 40, 5)
+    assert calls == []
+
+
+def test_new_batch_file_is_counted(tmp_path):
+    d = _write(tmp_path, "barcode01", "1", "Kept 8 reads out of 10 reads\n").parent
+    assert load_chopper_counts(str(tmp_path), "barcode01") == ChopperCounts(10, 8, 1)
+    _write(tmp_path, "barcode01", "2", "Kept 1 reads out of 2 reads\n")
+    t = time.time() - 30
+    os.utime(d, (t, t))   # directory mtime advanced past the memoised one
+    assert load_chopper_counts(str(tmp_path), "barcode01") == ChopperCounts(12, 9, 2)
+
+
+def test_directory_with_unfinished_file_is_not_memoised(tmp_path):
+    _write(tmp_path, "barcode01", "1", "Kept 8 reads out of 10 reads\n")
+    p = _write(tmp_path, "barcode01", "2", "")
+    assert load_chopper_counts(str(tmp_path), "barcode01") == ChopperCounts(10, 8, 1)
+    # The file is completed in place: its own mtime changes, the directory's
+    # does not. The sum must still pick it up.
+    p.write_text("Kept 1 reads out of 2 reads\n")
+    t = time.time() - 20
+    os.utime(p, (t, t))
+    assert load_chopper_counts(str(tmp_path), "barcode01") == ChopperCounts(12, 9, 2)
+
+
+def test_clear_drops_the_sample_memo(tmp_path):
+    _write(tmp_path, "barcode01", "1", "Kept 8 reads out of 10 reads\n")
+    load_chopper_counts(str(tmp_path), "barcode01")
+    assert cc._sample_memo
+    cc.clear_chopper_counts_cache()
+    assert not cc._sample_memo

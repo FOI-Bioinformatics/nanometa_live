@@ -260,18 +260,26 @@ def register_qc_callbacks(app: Dash):
         [
             State("qc-stats-rendered-fp", "data"),
             State("qc-stats-due", "data"),
+            State("app-config", "data"),
         ],
         prevent_initial_call=True,
     )
-    def gate_qc_stats(_fingerprint, _sample, _n, rendered_fp, due):
+    def gate_qc_stats(_fingerprint, _sample, _n, rendered_fp, due, config):
         """Main-process gate for the QC summary rebuild (round 3).
 
         Same defect class as gate_main_results: the background worker was
         spawned every tick just to PreventUpdate. The guard runs here.
+
+        chopper's counts are read here, where the per-sample memo lives, and
+        handed to the worker: it runs in a fresh process whose caches are
+        empty, and would otherwise re-open every batch's counts file.
         """
         if interval_tick_is_redundant_store(ctx, rendered_fp, _fingerprint):
             raise PreventUpdate
-        return {"n": int((due or {}).get("n", 0)) + 1}
+        main_dir = resolve_outdir_for_fingerprint(config)
+        chopper = load_chopper_counts(main_dir, _sample) if main_dir else None
+        return {"n": int((due or {}).get("n", 0)) + 1,
+                "chopper": [chopper.reads_in, chopper.reads_kept] if chopper else None}
 
     @app.callback(
         [
@@ -408,14 +416,18 @@ def register_qc_callbacks(app: Dash):
                         # 60/30/10 split. The only input count is chopper's
                         # own; without it the lines say "not recorded".
                         tot_reads_pre_filt = 0
-                chopper = load_chopper_counts(main_dir, selected_sample)
-                if chopper:
+                # The gate hands chopper's (in, kept) over; this worker's
+                # own caches are empty in every fresh process.
+                handed = (_due or {}).get("chopper", "absent")
+                if handed == "absent":
+                    loaded = load_chopper_counts(main_dir, selected_sample)
+                    handed = [loaded.reads_in, loaded.reads_kept] if loaded else None
+                if handed:
                     # chopper's kept and input counts are one pair; mixing
                     # its input with SeqKit's output count would pair two
                     # different read sets.
-                    tot_reads_pre_filt = chopper.reads_in
-                    tot_passed_reads = chopper.reads_kept
-                    tot_removed_reads = chopper.reads_in - chopper.reads_kept
+                    tot_reads_pre_filt, tot_passed_reads = handed
+                    tot_removed_reads = tot_reads_pre_filt - tot_passed_reads
                     breakdown_recorded = False
 
             # Get classification stats from Kraken2 (sample-filtered)

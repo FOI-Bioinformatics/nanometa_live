@@ -307,3 +307,23 @@ def test_guidance_pairs_chopper_input_with_chopper_kept(qc_app, tmp_path, _fresh
             ctx_trigger("results-fingerprint"):
         fn("fp-guide-lag", "barcode01", 0, config)
     assert seen == {"pre_filter": 150, "passed": 120}
+
+
+def test_gate_hands_chopper_counts_to_the_worker(qc_app, tmp_path, _fresh_loaders):
+    """The QC stats worker runs in a fresh process with empty caches; the
+    main-process gate reads chopper's counts (memoised) and hands them over
+    (final review: per-poll cost)."""
+    config = _chopper_tree(tmp_path)
+    gate = get_callback_fn(qc_app, "qc-stats-due")
+    with ctx_trigger("results-fingerprint"):
+        due = gate("fp-gate", "barcode01", 0, None, {"n": 1}, config)
+    assert due == {"n": 2, "chopper": [150, 120]}
+
+
+def test_worker_uses_the_handed_over_counts(qc_app, tmp_path, _fresh_loaders):
+    config = _chopper_tree(tmp_path, with_counts=False)
+    fn = get_callback_fn(qc_app, "qc-reads-pre-filtering")
+    with ctx_trigger("results-fingerprint"):
+        result = fn({"n": 1, "chopper": [150, 120]}, "fp-hand", "barcode01",
+                    config, {"running": False}, None)
+    assert "Raw reads (before filtering): 150" in " | ".join(result[:10])
