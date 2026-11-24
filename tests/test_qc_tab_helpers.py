@@ -271,3 +271,52 @@ class TestPlaceholders:
         figs = _get_empty_qc_figures()
         assert len(figs) == 4
         assert all(isinstance(f, go.Figure) for f in figs)
+
+
+# --------------------------------------------------------------------------- #
+# Reads before filtering: fastp's own count, else chopper's (Barcelona
+# exercise feedback, 2026-11-24)
+# --------------------------------------------------------------------------- #
+
+def _chopper_counts_file(root, sample, text):
+    d = root / "chopper" / sample / "counts"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{sample}.1.chopper_counts.txt").write_text(text)
+
+
+def test_prefilter_prefers_fastp(tmp_path):
+    from nanometa_live.app.tabs.qc_tab_helpers import prefilter_read_count
+    _chopper_counts_file(tmp_path, "barcode01", "Kept 120 reads out of 150 reads\n")
+    assert prefilter_read_count(str(tmp_path), "barcode01",
+                                {"total_reads_before": 500}) == 500
+
+
+def test_prefilter_uses_chopper_counts(tmp_path):
+    from nanometa_live.app.tabs.qc_tab_helpers import prefilter_read_count
+    from nanometa_live.core.utils.chopper_counts import clear_chopper_counts_cache
+    clear_chopper_counts_cache()
+    _chopper_counts_file(tmp_path, "barcode01", "Kept 120 reads out of 150 reads\n")
+    assert prefilter_read_count(str(tmp_path), "barcode01",
+                                {"total_reads_before": 0}) == 150
+    assert prefilter_read_count(str(tmp_path), "barcode01") == 150
+
+
+def test_prefilter_none_without_either(tmp_path):
+    from nanometa_live.app.tabs.qc_tab_helpers import prefilter_read_count
+    assert prefilter_read_count(str(tmp_path), "barcode01", {}) is None
+
+
+def test_stat_lines_without_removal_breakdown_say_not_recorded():
+    from nanometa_live.app.tabs.qc_tab_helpers import compute_qc_stat_lines
+    lines = compute_qc_stat_lines(
+        tot_reads_pre_filt=150, tot_passed_reads=120, tot_removed_reads=30,
+        tot_low_quality_reads=0, tot_too_short_reads=0, tot_too_many_N_reads=0,
+        classified_reads=100, unclassified_reads=20,
+        processed_files=0, waiting_files=0, breakdown_recorded=False,
+    )
+    joined = " | ".join(lines)
+    assert "Raw reads (before filtering): 150" in joined
+    assert "Total reads removed: 30 (20.0%)" in joined
+    assert "Too short: not recorded by the read filter" in joined
+    assert "Too low quality: not recorded by the read filter" in joined
+    assert "Too low complexity: not recorded by the read filter" in joined

@@ -139,3 +139,105 @@ def test_update_per_sample_table_populated(qc_app, populated_config):
         result = fn("fp1", "All Samples", 0, "qc-tab", populated_config, {"running": True})
     assert isinstance(result, list)
     assert len(result) > 0  # 3 samples in the dataset
+
+
+# --------------------------------------------------------------------------- #
+# Reads before filtering from chopper's own counts (Barcelona exercise
+# feedback, 2026-11-24)
+# --------------------------------------------------------------------------- #
+
+_KREPORT = ("16.67\t20\t20\tU\t0\tunclassified\n"
+            "83.33\t100\t0\tR\t1\troot\n"
+            "83.33\t100\t100\tS\t562\t  Escherichia coli\n")
+_SEQKIT = ("file\tformat\ttype\tnum_seqs\tsum_len\tmin_len\tavg_len\tmax_len\n"
+           "barcode01.chopped.fastq.gz\tFASTQ\tDNA\t120\t120000\t1000\t1000.0\t1000\n")
+
+
+def _chopper_tree(root, with_counts=True):
+    (root / "kraken2").mkdir(parents=True)
+    (root / "kraken2" / "barcode01.kraken2.report.txt").write_text(_KREPORT)
+    (root / "seqkit").mkdir()
+    (root / "seqkit" / "barcode01.tsv").write_text(_SEQKIT)
+    if with_counts:
+        d = root / "chopper" / "barcode01" / "counts"
+        d.mkdir(parents=True)
+        (d / "barcode01.1.chopper_counts.txt").write_text(
+            "Kept 120 reads out of 150 reads\n")
+    _backdate(str(root))
+    return {"results_output_directory": str(root), "main_dir": str(root)}
+
+
+def _text(component):
+    out = []
+
+    def walk(c):
+        if isinstance(c, str):
+            out.append(c)
+        elif isinstance(c, (list, tuple)):
+            for x in c:
+                walk(x)
+        elif hasattr(c, "children"):
+            walk(c.children)
+    walk(component)
+    return " ".join(out)
+
+
+@pytest.fixture
+def _fresh_loaders():
+    from nanometa_live.core.utils.loader_utils import clear_all_loader_caches
+    clear_all_loader_caches()
+    yield
+    clear_all_loader_caches()
+
+
+def test_stage_strip_shows_chopper_reads_before_filtering(qc_app, tmp_path, _fresh_loaders):
+    config = _chopper_tree(tmp_path)
+    fn = get_callback_fn(qc_app, "qc-stage-strip")
+    with ctx_trigger("results-fingerprint"):
+        strip = fn("fp-chopper", "barcode01", 0, config)
+    text = _text(strip)
+    assert "150" in text
+    assert "not recorded" not in text
+
+
+def test_stage_strip_without_counts_is_unchanged(qc_app, tmp_path, _fresh_loaders):
+    config = _chopper_tree(tmp_path, with_counts=False)
+    fn = get_callback_fn(qc_app, "qc-stage-strip")
+    with ctx_trigger("results-fingerprint"):
+        strip = fn("fp-nocounts", "barcode01", 0, config)
+    assert "not recorded" in _text(strip)
+
+
+def test_stat_lines_use_chopper_counts(qc_app, tmp_path, _fresh_loaders):
+    config = _chopper_tree(tmp_path)
+    fn = get_callback_fn(qc_app, "qc-reads-pre-filtering")
+    with ctx_trigger("results-fingerprint"):
+        result = fn({"n": 1}, "fp-stat", "barcode01", config, {"running": False}, None)
+    joined = " | ".join(result[:10])
+    assert "Raw reads (before filtering): 150" in joined
+    assert "Reads that passed filtering: 120 (80.0%)" in joined
+    assert "Total reads removed: 30 (20.0%)" in joined
+    assert "Too short: not recorded by the read filter" in joined
+
+
+def test_stat_lines_without_counts_say_not_recorded(qc_app, tmp_path, _fresh_loaders):
+    config = _chopper_tree(tmp_path, with_counts=False)
+    fn = get_callback_fn(qc_app, "qc-reads-pre-filtering")
+    with ctx_trigger("results-fingerprint"):
+        result = fn({"n": 1}, "fp-stat2", "barcode01", config, {"running": False}, None)
+    assert "Raw reads (before filtering): not recorded" in " | ".join(result[:10])
+
+
+def test_guidance_receives_chopper_prefilter(qc_app, tmp_path, _fresh_loaders):
+    config = _chopper_tree(tmp_path)
+    fn = get_callback_fn(qc_app, "qc-action-guidance-container")
+    seen = {}
+
+    def spy(pre_filter, passed, classified, total_classified_input):
+        seen["pre_filter"] = pre_filter
+        return [], False
+
+    with patch.object(qc_mod, "qc_guidance_issues", spy), \
+            ctx_trigger("results-fingerprint"):
+        fn("fp-guide", "barcode01", 0, config)
+    assert seen["pre_filter"] == 150

@@ -18,6 +18,7 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import plotly.express as px
 
+from nanometa_live.core.utils.chopper_counts import load_chopper_counts
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
@@ -55,6 +56,7 @@ from nanometa_live.app.tabs.qc_tab_helpers import (  # noqa: E402
     _get_empty_qc_figures,
     _kreport_sample_name,
     compute_qc_stat_lines,
+    prefilter_read_count,
     build_qc_figures,
     aggregate_fastp_read_stats,
     qc_guidance_issues,
@@ -333,6 +335,7 @@ def register_qc_callbacks(app: Dash):
             processed_files = 0
             waiting_files = 0
             chopper_estimated = False
+            breakdown_recorded = True
 
             # Get batch statistics for read counts
             if os.path.exists(batch_stats_dir):
@@ -382,13 +385,22 @@ def register_qc_callbacks(app: Dash):
                     seqkit_df = load_seqkit_stats(main_dir, selected_sample)
                     if not seqkit_df.empty and 'num_seqs' in seqkit_df.columns:
                         tot_passed_reads = int(seqkit_df['num_seqs'].sum())
-                        # No pre-filter count exists for chopper/filtlong:
                         # seqkit runs on the filtered reads and Kraken2
                         # classifies the same filtered reads, so neither is
                         # a "raw" count. Using the Kraken2 total made every
                         # run "pass 100%" and the removal breakdown a fixed
-                        # 60/30/10 split; the lines now say "not recorded".
+                        # 60/30/10 split. The only input count is chopper's
+                        # own; without it the lines say "not recorded".
                         tot_reads_pre_filt = 0
+                chopper = load_chopper_counts(main_dir, selected_sample)
+                if chopper:
+                    # chopper's kept and input counts are one pair; mixing
+                    # its input with SeqKit's output count would pair two
+                    # different read sets.
+                    tot_reads_pre_filt = chopper.reads_in
+                    tot_passed_reads = chopper.reads_kept
+                    tot_removed_reads = chopper.reads_in - chopper.reads_kept
+                    breakdown_recorded = False
 
             # Get classification stats from Kraken2 (sample-filtered)
             classified_reads = 0
@@ -422,6 +434,7 @@ def register_qc_callbacks(app: Dash):
                 processed_files=processed_files,
                 waiting_files=waiting_files,
                 chopper_estimated=chopper_estimated,
+                breakdown_recorded=breakdown_recorded,
             ), rendered]
 
         except Exception as e:
@@ -860,6 +873,10 @@ def register_qc_callbacks(app: Dash):
                 raw_reads = reads_before
                 is_chopper = False
                 filter_tool = "FASTP"
+            else:
+                raw_reads = prefilter_read_count(main_dir, selected_sample, fastp_stats)
+                if raw_reads is not None:
+                    is_chopper = False
 
             # Classification counts from cumulative Kraken2 — the authoritative
             # run-total view. Filtered is derived from the same source to keep
@@ -1028,6 +1045,10 @@ def register_qc_callbacks(app: Dash):
             if fastp_stats.get("total_reads_after", 0) > 0:
                 tot_reads_pre_filt = fastp_stats["total_reads_before"]
                 tot_passed_reads = fastp_stats["total_reads_after"]
+
+            if not tot_reads_pre_filt:
+                tot_reads_pre_filt = prefilter_read_count(
+                    main_dir, selected_sample, fastp_stats) or 0
 
             kraken_df = load_kraken_data(main_dir, selected_sample)
 

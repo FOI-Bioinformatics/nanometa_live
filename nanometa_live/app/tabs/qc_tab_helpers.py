@@ -381,6 +381,23 @@ def _build_stage_strip(raw_reads, filtered_reads, classified_reads, unclassified
     return html.Div(body_children, className="stage-strip-container")
 
 
+def prefilter_read_count(main_dir, sample, fastp_stats=None):
+    """Reads that entered the read filter, or None when nothing recorded them.
+
+    fastp reports its own input count; chopper's comes from the counts files
+    nanometanf publishes beside its output (``chopper_counts``). Filtlong
+    records none. SeqKit and Kraken2 both see the filtered reads, so neither
+    can stand in for this number.
+    """
+    before = int((fastp_stats or {}).get("total_reads_before", 0) or 0)
+    if before > 0:
+        return before
+    from nanometa_live.core.utils.chopper_counts import load_chopper_counts
+
+    counts = load_chopper_counts(main_dir, sample)
+    return counts.reads_in if counts else None
+
+
 def compute_qc_stat_lines(
     *,
     tot_reads_pre_filt: int,
@@ -394,6 +411,7 @@ def compute_qc_stat_lines(
     processed_files: int,
     waiting_files: int,
     chopper_estimated: bool = False,
+    breakdown_recorded: bool = True,
 ) -> list:
     """Turn the raw QC read counts into the ten formatted stat-tile strings.
 
@@ -453,9 +471,16 @@ def compute_qc_stat_lines(
             f"Total reads removed: {tot_removed_reads:,} ({percentage_removed}%)"
         )
         est = " (est.)" if chopper_estimated else ""
-        low_quality = f"Too low quality{est}: {tot_low_quality_reads:,} ({percentage_low_quality}%)"
-        too_short = f"Too short{est}: {tot_too_short_reads:,} ({percentage_too_short}%)"
-        low_complexity = f"Too low complexity{est}: {tot_too_many_N_reads:,} ({percentage_too_many_N}%)"
+        if breakdown_recorded:
+            low_quality = f"Too low quality{est}: {tot_low_quality_reads:,} ({percentage_low_quality}%)"
+            too_short = f"Too short{est}: {tot_too_short_reads:,} ({percentage_too_short}%)"
+            low_complexity = f"Too low complexity{est}: {tot_too_many_N_reads:,} ({percentage_too_many_N}%)"
+        else:
+            # chopper reports how many reads it kept, not why it dropped the
+            # rest, so the per-reason lines have nothing to show.
+            low_quality = "Too low quality: not recorded by the read filter"
+            too_short = "Too short: not recorded by the read filter"
+            low_complexity = "Too low complexity: not recorded by the read filter"
     else:
         reads_pre_filtering = ("Raw reads (before filtering): not recorded "
                                "(the read filter reports no input count)")

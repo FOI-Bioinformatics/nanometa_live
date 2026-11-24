@@ -17,6 +17,16 @@ v0.18.0).
   "Reads/sec" beside the counted reads on the Dashboard (596,019 against
   76,642 at the exercise). The tiles and the trend axis now say
   "estimated", with the reason on hover.
+- **The QC tab shows the reads before filtering on a chopper run.** chopper
+  records no count of its input outside its own log line, so the QC tab
+  said "not recorded" and the operator could not see how many reads the
+  filter removed or compare the run with MinKNOW. nanometanf (from the
+  release after 1.12.0) publishes that line per batch under
+  `chopper/<sample>/counts/`; the stage strip, the read-filtering lines
+  and the guidance banner now read it (`core/utils/chopper_counts.py`,
+  `qc_tab_helpers.prefilter_read_count`). chopper does not say why it
+  dropped a read, so the per-reason lines say "not recorded by the read
+  filter". A run without the files reads as before.
 
 ## [0.20.0] - 2026-11-24
 
