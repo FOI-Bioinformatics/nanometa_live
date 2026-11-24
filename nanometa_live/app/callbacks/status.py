@@ -18,6 +18,7 @@ from nanometa_live.core.utils.sample_detector import get_available_samples, get_
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.utils.previous_run import previous_run_header, previous_run_status
 from nanometa_live.app.utils.batch_progress import batch_progress
 from nanometa_live.app.utils.debounce import (
     should_skip_update, get_trigger_type,
@@ -345,6 +346,11 @@ def register_status(app, backend_manager):
                 details.append(f"{processed} files processed")
             return "orange", "Stopped", ", ".join(details) + unprocessed_note
 
+        # A restarted app opened on a finished run's results: name that run
+        # instead of inviting a Start (Barcelona exercise feedback).
+        prev = previous_run_status(resolve_outdir_for_fingerprint(config))
+        if prev is not None:
+            return previous_run_header(prev)
         return "gray", "STANDBY", "Click 'Start Analysis' to begin processing"
 
     @app.callback(

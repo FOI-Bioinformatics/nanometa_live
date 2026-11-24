@@ -91,6 +91,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     build_report_payload,
 )
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.utils.previous_run import format_duration, previous_run_status
 from nanometa_live.app.utils.batch_progress import batch_progress
 from nanometa_live.core.utils.staleness import stale_sample_count
 from nanometa_live.app.utils.organisms_memo import get_per_sample_organisms_cached
@@ -373,6 +374,16 @@ def register_dashboard_callbacks(app: Dash):
         else:
             run_state = "STANDBY"
             run_state_color = "secondary"
+            # Results reopened after their run ended: the tile shows that
+            # run's outcome and duration rather than 00:00:00.
+            prev = previous_run_status(resolve_outdir_for_fingerprint(config))
+            if prev is not None:
+                run_state, run_state_color = {
+                    "completed": ("COMPLETE", "info"),
+                    "stopped": ("STOPPED", "warning"),
+                    "error": ("ERROR", "danger"),
+                }[prev.run_state]
+                time_elapsed = format_duration(prev.duration_s)
 
         # ----------------------------------------------------------------
         # Gather the decision inputs (file I/O isolated to this block), then

@@ -38,6 +38,13 @@ v0.18.0).
   is now high on the Organisms tab, as it already was on the Dashboard.
   The unused `high_confidence_reads` / `medium_confidence_reads` config
   reads are gone.
+- **A results folder reopened after its run ended shows that run.** A
+  restarted app said STANDBY, "Click 'Start Analysis' to begin processing"
+  and a run time of 00:00:00 above the run's detections. Where the header
+  would say STANDBY it now reads the recorded outcome from
+  `.nanometa.run.json` ("LAST RUN - Completed at 12:12 (ran 3 h 12 min)"),
+  and the run-time tile shows that run's duration and state
+  (`app/utils/previous_run.py`). An active run is never described this way.
 
 ## [0.20.0] - 2026-11-24
 
