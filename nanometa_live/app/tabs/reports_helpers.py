@@ -14,12 +14,21 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 
 
-def _kpi_tile(value: str, label: str, icon: str) -> dbc.Col:
+# nanometanf estimates a batch's reads from its file size; the panel must not
+# present that figure as a count (Barcelona exercise feedback, 2026-11-24).
+ESTIMATE_NOTE = (
+    "Estimated by the pipeline from file size, not counted. "
+    "Counted reads are on the Quality Control tab."
+)
+
+
+def _kpi_tile(value: str, label: str, icon: str,
+              title: Optional[str] = None) -> dbc.Col:
     return dbc.Col(html.Div([
         html.I(className=f"bi {icon} text-primary"),
         html.H4(value, className="mb-0 mt-1"),
         html.Small(label, className="text-muted"),
-    ], className="text-center"), md=True)
+    ], className="text-center", title=title), md=True)
 
 
 def _fmt(value: Any, suffix: str = "", nd: int = 1) -> str:
@@ -98,10 +107,12 @@ def build_realtime_performance_panel(stats: Optional[Dict[str, Any]]) -> Any:
     alerts = stats.get("alerts", [])
 
     kpis = dbc.Row([
-        _kpi_tile(_fmt(perf.get("reads_per_second"), "/s"), "Reads/sec", "bi-speedometer2"),
+        _kpi_tile(_fmt(perf.get("reads_per_second"), "/s"), "Est. reads/sec",
+                  "bi-speedometer2", title=ESTIMATE_NOTE),
         _kpi_tile(_fmt(perf.get("files_per_second"), "/s"), "Files/sec", "bi-files"),
         _kpi_tile(_fmt(perf.get("batches_per_minute"), "/min"), "Batches/min", "bi-collection"),
-        _kpi_tile(_fmt(totals.get("total_estimated_reads"), nd=0), "Total reads", "bi-bar-chart"),
+        _kpi_tile(_fmt(totals.get("total_estimated_reads"), nd=0), "Reads (estimated)",
+                  "bi-bar-chart", title=ESTIMATE_NOTE),
         _kpi_tile(_fmt(session.get("total_batches"), nd=0), "Batches", "bi-stack"),
     ], className="g-2 mb-3")
 
@@ -115,7 +126,7 @@ def build_realtime_performance_panel(stats: Optional[Dict[str, Any]]) -> Any:
         ))
         fig.update_layout(
             height=220, margin=dict(l=40, r=10, t=10, b=30),
-            xaxis_title="Batch", yaxis_title="Reads", paper_bgcolor="white",
+            xaxis_title="Batch", yaxis_title="Reads (estimated)", paper_bgcolor="white",
             plot_bgcolor="white",
         )
         trend = dcc.Graph(figure=fig, config={"displayModeBar": False})

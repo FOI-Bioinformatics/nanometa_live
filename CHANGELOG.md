@@ -6,6 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Fixes from the feedback on the October 2026 Barcelona exercise (run on
+v0.18.0).
+
+### Fixed
+
+- **The Reports tab labels the pipeline's read figure as an estimate.**
+  nanometanf estimates each batch's reads from its file size, and the
+  Live Performance panel showed that figure as "Total reads" and
+  "Reads/sec" beside the counted reads on the Dashboard (596,019 against
+  76,642 at the exercise). The tiles and the trend axis now say
+  "estimated", with the reason on hover.
+
 ## [0.20.0] - 2026-11-24
 
 **Requires nanometanf v1.12.0**: this release sends a digit-only sample
