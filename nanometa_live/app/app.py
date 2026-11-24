@@ -805,7 +805,7 @@ def create_app(
                                              "display": "inline-flex", "alignItems": "center", "justifyContent": "center"}),
                             html.Strong("Configure"),
                         ], className="d-flex align-items-center mb-1"),
-                        html.P("Go to the Configuration tab and set your input directory and Kraken2 database. Settings are saved automatically between sessions.",
+                        html.P("Go to the Configuration tab and set your input directory and Kraken2 database. Settings you apply are kept as 'Last Session'; each launch starts from the defaults, and Configuration > Load restores them.",
                                className="text-muted small ms-4 mb-3"),
                     ]),
                     html.Div([

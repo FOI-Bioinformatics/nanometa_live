@@ -265,7 +265,8 @@ class TestZeroReadSampleDoesNotBorrowAggregateStats:
             "its own"
         )
         assert row2["base_pairs"] != 5_000_000
-        assert row2["mean_quality"] in (0, "N/A")
+        # Missing (None / NaN, shown as "--"), never a borrowed value.
+        assert row2["mean_quality"] in (0, None) or row2["mean_quality"] != row2["mean_quality"]
         # Read total still falls back to this sample's own Kraken2 count.
         assert row2["reads_cumul"] == 2
 

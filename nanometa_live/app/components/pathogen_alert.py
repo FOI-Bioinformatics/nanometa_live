@@ -153,7 +153,11 @@ def _validation_badge(
     if show_identity and status in ("confirmed", "validated", "partial", "uncertain"):
         identity = validation.get("identity") or 0.0
         if identity > 0:
-            label = f"{label} {identity:.0f}%"
+            # Named: "Validated 97%" read as 97% of reads validated.
+            label = f"{label} \u00b7 {identity:.0f}% identity"
+    n_best, n_samples = validation.get("n_best"), validation.get("n_samples")
+    if n_best and n_samples and n_best < n_samples:
+        label = f"{label} (in {n_best} of {n_samples} samples)"
 
     n_validated = validation.get("n_validated", 0)
     n_samples = validation.get("n_samples", 0)

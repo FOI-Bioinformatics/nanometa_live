@@ -1150,10 +1150,9 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
             total_reads = reads_after
             total_bases = bases_after
             pass_rate = round((reads_after / reads_before * 100), 1) if reads_before > 0 else 0
-            # Estimate mean quality from q30 rate
-            q30_rate = fastp_stats.get('q30_rate_after', 0)
-            if q30_rate > 0:
-                mean_quality = round(10 + 25 * q30_rate, 1)
+            # fastp reports no mean read quality. The cell used to show
+            # 10 + 25 * q30_rate, a formula labelled as a measurement; it
+            # stays blank for a fastp run (live test 2026-11-24).
         else:
             # Fall back to NanoPlot stats (used when chopper is the QC tool)
             nanoplot_stats = load_nanoplot_stats(main_dir, sample)
@@ -1242,7 +1241,9 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
             'sample': sample,
             'base_pairs': total_bases,
             'pass_rate': pass_rate_display,
-            'mean_quality': round(mean_quality, 1) if mean_quality > 0 else "N/A",
+            # None, not "N/A": the grid types the column as numeric and
+            # rendered the string as "Invalid Number".
+            'mean_quality': round(mean_quality, 1) if mean_quality > 0 else None,
             'n50': n50 if n50 > 0 else "N/A",
             'status': status,
 

@@ -65,6 +65,7 @@ from nanometa_live.app.tabs.main_tab_helpers import (  # noqa: E402
     validation_store_entry,
     not_detected_caveat,
     count_organisms_found,
+    resolve_min_abundance,
 )
 from nanometa_live.app.tabs.dashboard_helpers import (  # noqa: E402
     DEFAULT_LOW_READ_FLOOR,
@@ -390,7 +391,7 @@ def register_main_callbacks(app: Dash):
 
         # Set filter defaults
         top_count = top_count or 10
-        min_abundance = min_abundance or 0.1
+        min_abundance = resolve_min_abundance(min_abundance)
         tax_ranks = tax_ranks or ["S", "G"]
 
         # Background-callback isolation: the DiskcacheManager worker is a
@@ -937,17 +938,31 @@ def register_main_callbacks(app: Dash):
             State("export-filename", "value"),
             State("detailed-organism-table", "rowData"),
             State("app-config", "data"),
+            State("selected-sample", "data"),
         ],
         prevent_initial_call=True,
     )
-    def export_organism_data(n_clicks, export_format, filename, table_data, config):
+    def export_organism_data(n_clicks, export_format, filename, table_data, config,
+                             selected_sample=None):
         """Export organism data to file."""
         if not n_clicks or not table_data:
             return no_update
 
         try:
+            # The sample's own read total (classified + unclassified), as on
+            # the Dashboard tile; the table cannot give one.
+            total_reads = None
+            main_dir = resolve_outdir_for_fingerprint(config)
+            if main_dir:
+                from nanometa_live.app.utils.callback_helpers import get_classification_stats
+                kdf = load_kraken_data(main_dir, selected_sample or "All Samples")
+                if not kdf.empty:
+                    c, u, _ = get_classification_stats(kdf)
+                    total_reads = c + u or None
             # Export payload construction is a pure function in main_tab_helpers.
-            return build_organism_export(table_data, export_format, filename)
+            return build_organism_export(table_data, export_format, filename,
+                                         total_reads=total_reads,
+                                         sample=selected_sample)
 
         except Exception as e:
             logging.error(f"Error exporting data: {e}")

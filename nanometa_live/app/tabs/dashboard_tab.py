@@ -21,6 +21,7 @@ import dash_bootstrap_components as dbc
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.app.tabs.dashboard_helpers import _fingerprint_marks_dir_seen
 from nanometa_live.app.utils.countdown import remaining_from_deadline
+from nanometa_live.core.taxonomy.ranks import count_organisms_found
 from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
     load_nanoplot_stats,
@@ -738,12 +739,8 @@ def register_dashboard_callbacks(app: Dash):
                 )
                 sample_reads = sample_classified + sample_unclassified
                 sequences_count = f"{sample_reads:,}"
-                if not sample_kraken_df.empty:
-                    org_df = sample_kraken_df[sample_kraken_df["rank"].isin(["S", "G"])]
-                    org_df = org_df[org_df["taxid"] > 1]
-                    organisms_count = str(len(org_df[org_df["reads"] >= 1]))
-                else:
-                    organisms_count = "0"
+                # Same rule as the Organisms tab (count_organisms_found).
+                organisms_count = str(count_organisms_found(sample_kraken_df))
             else:
                 sequences_count = f"{overall_status['total_reads']:,}"
                 organisms_count = str(overall_status['organisms_detected'])
@@ -861,6 +858,25 @@ def register_dashboard_callbacks(app: Dash):
         except (IndexError, KeyError) as e:
             logger.error(f"Error handling sample selection: {e}")
             return no_update
+
+    @app.callback(
+        Output("dashboard-sample-table", "selectedRows"),
+        # The Store, not the dropdown: it mirrors the dropdown (one writer,
+        # update_selected_sample) and dashboard callbacks key on it.
+        Input("selected-sample", "data"),
+        State("dashboard-sample-table", "selectedRows"),
+        prevent_initial_call=True,
+    )
+    def sync_table_selection_to_selector(value, selected_rows):
+        """Clear the grid's row selection when the dropdown names another sample.
+
+        Otherwise the row stayed highlighted after the dropdown went back to
+        All Samples, and clicking it again changed nothing: AG Grid does not
+        re-emit an unchanged selection (live test 2026-11-24).
+        """
+        if not selected_rows or selected_rows[0].get("sample") == value:
+            raise PreventUpdate
+        return []
 
     @app.callback(
         [

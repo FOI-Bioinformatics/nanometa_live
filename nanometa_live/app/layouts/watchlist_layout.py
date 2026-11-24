@@ -688,7 +688,9 @@ def _create_collapsible_add_species() -> dbc.Accordion:
                         id="watchlist-add-threshold",
                         type="number",
                         value=10,
-                        min=1,
+                        # No min: the browser drops a value below it and the
+                        # server applied the default silently; the Add
+                        # callback refuses it with a message instead.
                         size="sm",
                     ),
                 ], md=2),

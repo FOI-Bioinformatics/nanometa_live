@@ -172,7 +172,7 @@ def create_header(title="Nanometa Live"):
                     ),
 
                     dbc.Badge(
-                        "Auto-saved",
+                        "Session saved",
                         id="config-status-badge",
                         color="success",
                         className="me-2 align-self-center",

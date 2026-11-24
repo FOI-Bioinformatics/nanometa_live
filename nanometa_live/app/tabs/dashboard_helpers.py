@@ -30,7 +30,7 @@ from nanometa_live.core.utils.qc_loaders import (
     summarize_seqkit_rows,
 )
 from nanometa_live.core.utils.alert_engine import get_alert_engine
-from nanometa_live.core.taxonomy.ranks import species_rank_mask
+from nanometa_live.core.taxonomy.ranks import species_rank_mask, count_organisms_found
 from nanometa_live.core.utils.attribution import (  # noqa: F401  (re-exported)
     PER_SAMPLE_DISCOVERY_FLOOR,
     PathogenAttribution,
@@ -1366,12 +1366,10 @@ def _calculate_overall_status(
     # Estimate quality score from data (simplified)
     quality_score = _estimate_quality_score(main_dir, kraken_df)
 
-    # Count organisms (species + genus level, >= 1 read, matching Organisms tab)
-    organisms_detected = 0
-    if not kraken_df.empty:
-        org_df = kraken_df[kraken_df["rank"].isin(["S", "G"])]
-        org_df = org_df[org_df["taxid"] > 1]
-        organisms_detected = len(org_df[org_df["reads"] >= 1])
+    # Count organisms by the Organisms tab's rule (species with reads plus
+    # genus-only identifications, cumulative reads); direct reads put the
+    # Dashboard at 1 against the Organisms tab's 2 for one sample.
+    organisms_detected = count_organisms_found(kraken_df)
 
     # Determine overall status
     if visualization_only and not pipeline_running:
@@ -1474,19 +1472,9 @@ def _estimate_quality_score(main_dir: str, kraken_df: pd.DataFrame) -> Optional[
                     score = max(30, int(q_score * 7))  # Below Q10 is concerning
                 logger.debug(f"Quality score from NanoPlot Q{q_score}: {score}")
 
-        # Still no score? Use read length as proxy
-        if score is None:
-            if qc_stats.get('source') != 'none':
-                avg_len = qc_stats.get('avg_read_length', 0)
-                if avg_len > 3000:
-                    score = 85
-                elif avg_len > 2000:
-                    score = 75
-                elif avg_len > 1000:
-                    score = 65
-                else:
-                    score = 50
-
+        # No measured quality: no score. A read-length proxy (under 1 kb ->
+        # 50) used to fill the gap, and the alert panel reported it as
+        # "Overall quality is 50.0%" beside a "--" quality tile.
         if score is None:
             return None
 
@@ -1699,9 +1687,7 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
                 # cumulative reads (never kraken_df["reads"].sum()).
                 classified_reads, unclassified_reads, rate = get_classification_stats(kraken_df)
                 reads = classified_reads + unclassified_reads
-                org_df = kraken_df[kraken_df["rank"].isin(["S", "G"])]
-                org_df = org_df[org_df["taxid"] > 1]
-                organisms = len(org_df[org_df["reads"] >= 1])
+                organisms = count_organisms_found(kraken_df)
 
                 if reads == 0:
                     # A report with no reads (nanometanf's placeholder for a
@@ -2759,6 +2745,12 @@ def _load_validation_lookup(main_dir: str) -> Dict[Tuple[str, int], Dict[str, An
                 status = str(status_attr.value)
             else:
                 status = str(status_attr) if status_attr is not None else "no_data"
+            method = str(getattr(r, "validation_method", "blast") or "blast")
+            # BLAST and minimap2 report the same pair; the last one read
+            # used to win. BLAST (read-level confirmation) is kept.
+            existing = lookup.get((sample_id, taxid))
+            if existing is not None and existing["method"] == "blast" and method != "blast":
+                continue
             lookup[(sample_id, taxid)] = {
                 "status": status,
                 "identity": float(getattr(r, "percent_identity_mean", 0.0) or 0.0),
@@ -2824,12 +2816,22 @@ def _summarise_validation_for_taxid(
         return None
 
     best = max(rows, key=lambda e: _VALIDATION_RANK.get(e.get("status", "no_data"), 0))
-    avg_identity = sum(r["identity"] for r in rows) / len(rows)
+    best_rank = _VALIDATION_RANK.get(best.get("status", "no_data"), 0)
+    # Identity weighted by validated reads, over samples that measured one:
+    # a plain mean let a failed sample's 0 pull two 97% samples to 65%.
+    measured = [r for r in rows if (r.get("identity") or 0) > 0]
+    weight = sum(max(1, int(r.get("validated_reads", 0) or 0)) for r in measured)
+    identity = (sum(r["identity"] * max(1, int(r.get("validated_reads", 0) or 0))
+                    for r in measured) / weight) if measured else 0.0
     method = best.get("method", "blast")
     return {
         "status": best.get("status", "no_data"),
-        "identity": avg_identity,
+        "identity": identity,
         "method": method,
         "n_validated": len(rows),
         "n_samples": len(samples),
+        # Samples that reached the status shown: the badge states it when
+        # not all did (one confirmed of three read as "Validated").
+        "n_best": sum(1 for r in rows
+                      if _VALIDATION_RANK.get(r.get("status", "no_data"), 0) == best_rank),
     }

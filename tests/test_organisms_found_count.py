@@ -62,3 +62,19 @@ def test_species_under_an_intermediate_rank_still_covers_its_genus():
         [100.0, 100, 100, "S", 11, "GenA spA", 15],
     ])
     assert count_organisms_found(df) == 1
+
+
+def test_dashboard_counts_organisms_by_the_same_rule():
+    """The Dashboard tile and sample table counted S and G rows by DIRECT
+    reads: 1 on the Dashboard against 2 on the Organisms tab for the same
+    sample (live test 2026-11-24)."""
+    import inspect
+    from nanometa_live.app.tabs import dashboard_helpers, dashboard_tab
+    from nanometa_live.core.taxonomy.ranks import count_organisms_found as shared
+
+    from nanometa_live.app.tabs.main_tab_helpers import count_organisms_found as reexported
+    assert reexported is shared
+    for module in (dashboard_helpers, dashboard_tab):
+        src = inspect.getsource(module)
+        assert 'org_df["reads"] >= 1' not in src, module.__name__
+        assert "count_organisms_found" in src, module.__name__

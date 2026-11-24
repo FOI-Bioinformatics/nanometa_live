@@ -153,8 +153,22 @@ class TestComputeQcStatLines:
         assert "(est.)" in lines[3]
 
     def test_zero_prefilter_shows_unavailable(self):
-        lines = compute_qc_stat_lines(**self._counts(tot_reads_pre_filt=0))
-        assert "not available for Chopper pipeline" in lines[0]
+        """No pre-filter count (chopper and filtlong record none): no pass
+        rate and no removal breakdown, rather than 0% or a fabricated split
+        (live test 2026-11-24: "Raw reads (pre-Chopper): 1,660 / passed
+        filtering: 1,660 (100.0%)")."""
+        lines = compute_qc_stat_lines(**self._counts(
+            tot_reads_pre_filt=0, tot_removed_reads=0, tot_low_quality_reads=0,
+            tot_too_short_reads=0, tot_too_many_N_reads=0))
+        assert "not recorded" in lines[0]
+        assert lines[1] == "Reads that passed filtering: 900"
+        assert "not recorded" in lines[2]
+        for line in lines[3:6]:
+            assert "not recorded" in line
+
+    def test_label_names_no_tool(self):
+        lines = compute_qc_stat_lines(**self._counts())
+        assert lines[0].startswith("Raw reads (before filtering)")
 
     def test_seqkit_overcount_adjusts_baseline(self):
         # passed > pre_filt -> baseline bumped, removed zeroed, passed shows 100%.

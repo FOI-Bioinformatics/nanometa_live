@@ -87,7 +87,7 @@ def create_dashboard_layout():
                 html.Ul([
                     html.Li([html.Strong("Sequences Analyzed: "), "Total DNA fragments processed."]),
                     html.Li([html.Strong("Sample Quality: "), "Overall data quality based on Q-score."]),
-                    html.Li([html.Strong("Species Detected: "), "Distinct organisms found."]),
+                    html.Li([html.Strong("Organisms Found: "), "Species with reads, plus organisms identified only to genus (same count as the Organisms tab)."]),
                     html.Li([html.Strong("Run Time: "), "Elapsed time since analysis started."]),
                 ]),
                 html.H5("Sample Details"),
@@ -215,7 +215,7 @@ def create_dashboard_layout():
                 value_id="dashboard-organisms-count",
                 icon_class="bi bi-bug-fill",
                 icon_color="#6f42c1",
-                label="Species Detected",
+                label="Organisms Found",
                 value="0",
             ),
 

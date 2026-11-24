@@ -22,6 +22,7 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from dash import html
 
+from nanometa_live.app.tabs.watchlist_add_helpers import custom_species_problem
 from nanometa_live.core.watchlist.watchlist_manager import (
     get_watchlist_manager,
     WatchlistEntry,
@@ -1585,6 +1586,12 @@ def register_watchlist_callbacks(app: Dash) -> None:
             raise PreventUpdate
 
         manager = get_watchlist_manager()
+
+        problem = custom_species_problem(
+            name, taxid, db_taxid, threshold, manager.get_all_entries())
+        if problem:
+            return (no_update, dbc.Alert(problem, color="warning", duration=6000),
+                    *([no_update] * 7))
 
         entry_data = {
             "name": name.strip(),

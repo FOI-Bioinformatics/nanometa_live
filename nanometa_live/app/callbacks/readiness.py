@@ -509,7 +509,7 @@ def register_readiness(app, backend_manager):
         last_session = str(paths.last_session_yaml)
         badge_style = {"fontSize": "0.75rem", "display": "inline-block"}
         if os.path.exists(last_session):
-            return "Auto-saved", "success", badge_style
+            return "Session saved", "success", badge_style
         return "Not saved", "secondary", badge_style
 
     # ========================================================================

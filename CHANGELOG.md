@@ -8,6 +8,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Medium findings of the 2026-11-24 live test.** Each displayed value is
+  now measured, or marked as not measured:
+  - Alert cards' validation badge: BLAST is no longer hidden by a minimap2
+    row for the same pair; identity is read-weighted over the samples that
+    were measured (failed samples' zeros pulled it down) and labelled
+    "N% identity (in k of n samples)".
+  - Validation criteria banner states the read and breadth floors that
+    decide CONFIRMED and describes MAPQ as a counting filter, not a rule.
+  - QC table "Avg. Q score": a sample with no reads shows "--", not
+    "Invalid Number"; fastp runs no longer show `10 + 25 x Q30` as a mean
+    quality (fastp reports none).
+  - QC read statistics on chopper/filtlong runs: the Kraken2 total (which
+    counts filtered reads) is no longer shown as the raw count, so the
+    "passed 100%" line and the fixed 60/30/10 removal split are gone; the
+    lines say "not recorded". The N50 card no longer blames "FASTP mode".
+  - QC guidance judges a pass rate only where one was measured; every
+    sample of a NanoPlot-only run was told to re-sequence.
+  - QC plots on seqkit runs use the loader's sample name ("run.2" was
+    "run") and each sample's file time (all points sat at "now").
+  - QC export writes the Q20/Q30/GC the Base Quality card shows (one shared
+    computation, `fastp_quality_rates`) and the pooled seqkit metrics.
+  - Organisms TXT export: "Total DNA Sequences" is the sample's read total,
+    not the table's reads summed across ranks (a genus row contains its
+    species); the % note says what it is a share of.
+  - Dashboard tile "Species Detected" is now "Organisms Found" and counts by
+    the Organisms tab's rule (`count_organisms_found`, moved to
+    `core/taxonomy/ranks.py`).
+  - Organisms "Minimum abundance": a typed 0 is 0 (it became 0.1) and
+    values such as 0.05 are accepted.
+  - The alert panel no longer reports "Overall quality 50%" from an average
+    read length when no quality was measured.
+  - Dashboard sample table: the row selection clears when the dropdown names
+    another sample, so clicking the same row again selects it.
+  - Welcome text, Apply tooltip and help text describe what is kept
+    ("Last Session", restored through Configuration > Load); the header
+    badge reads "Session saved" instead of "Auto-saved".
+  - Add Custom Species refuses a non-positive taxid or threshold and a
+    species already on the list (same taxid pair or name), with a message.
+
 - **Organisms-tab inline BLAST validation badge resolves on GTDB/flextaxd
   databases.** `validation_loaders._load_blast_validation_data_uncached`
   matched each watched organism by its NCBI taxid only, while on a flextaxd

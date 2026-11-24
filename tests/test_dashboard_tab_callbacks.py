@@ -266,6 +266,21 @@ def test_handle_sample_selection(dash_app):
     assert fn([{"no_sample_key": 1}]) is no_update   # KeyError path
 
 
+def test_grid_selection_follows_the_dropdown(dash_app):
+    """A row stayed selected after the dropdown went back to All Samples, so
+    clicking that row again changed nothing (live test 2026-11-24). The
+    selection is cleared whenever the dropdown names another sample."""
+    from dash.exceptions import PreventUpdate
+    fn = get_callback_fn(dash_app, "dashboard-sample-table.selectedRows",
+                         input_contains="selected-sample")
+    assert fn("All Samples", [{"sample": "barcode02"}]) == []
+    assert fn("barcode03", [{"sample": "barcode02"}]) == []
+    with pytest.raises(PreventUpdate):
+        fn("barcode02", [{"sample": "barcode02"}])
+    with pytest.raises(PreventUpdate):
+        fn("All Samples", [])
+
+
 # --------------------------------------------------------------------------- #
 # update_quality_card (empty path)
 # --------------------------------------------------------------------------- #

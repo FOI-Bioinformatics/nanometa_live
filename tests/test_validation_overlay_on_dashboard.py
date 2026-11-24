@@ -154,10 +154,27 @@ class TestSummariseValidationForTaxid:
         samples = [{"sample": "s1"}, {"sample": "s2"}, {"sample": "s3"}]
         result = _summarise_validation_for_taxid(samples, 562, self._lookup())
         assert result["status"] == "confirmed"
-        # Identity is the average across samples
-        assert result["identity"] == pytest.approx((95.0 + 80.0 + 60.0) / 3)
+        # Identity is weighted by validated reads: a plain mean let a
+        # 10-read sample pull a 90-read one down as hard as its equal.
+        assert result["identity"] == pytest.approx(
+            (95.0 * 90 + 80.0 * 50 + 60.0 * 10) / 150)
         assert result["n_validated"] == 3
         assert result["n_samples"] == 3
+        # The status shown is reached by one of the three samples.
+        assert result["n_best"] == 1
+
+    def test_failed_sample_does_not_drag_identity_down(self):
+        """F. tularensis read "Validated 65%" = (97 + 97 + 0) / 3 when one
+        sample's validation had failed (live test 2026-11-24)."""
+        from nanometa_live.app.tabs.dashboard_helpers import _summarise_validation_for_taxid
+        lookup = {
+            ("s1", 263): {"status": "confirmed", "identity": 97.0, "validated_reads": 50},
+            ("s2", 263): {"status": "confirmed", "identity": 97.0, "validated_reads": 50},
+            ("s3", 263): {"status": "failed", "identity": 0.0, "validated_reads": 0},
+        }
+        result = _summarise_validation_for_taxid(
+            [{"sample": "s1"}, {"sample": "s2"}, {"sample": "s3"}], 263, lookup)
+        assert result["identity"] == pytest.approx(97.0)
 
     def test_returns_partial_when_no_confirmed(self):
         from nanometa_live.app.tabs.dashboard_helpers import _summarise_validation_for_taxid
@@ -288,3 +305,44 @@ class TestPathogenAlertComponentsAcceptValidation:
         assert CriticalPathogenAlert(pathogen_name="X") is not None
         assert HighRiskPathogenAlert(pathogen_name="X") is not None
         assert WatchedSpeciesAlert(pathogen_name="X") is not None
+
+
+
+def test_lookup_keeps_blast_when_minimap2_shares_the_pair():
+    """BLAST and minimap2 for one (sample, taxid) overwrote each other, so
+    B. mallei read "Partial" (minimap2) though BLAST confirmed it."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from nanometa_live.app.tabs import dashboard_helpers as dh
+    from nanometa_live.core.parsers.blast_validation_parser import ValidationStatus
+
+    blast = SimpleNamespace(sample_id="s1", taxid=13373, status=ValidationStatus.CONFIRMED,
+                            percent_identity_mean=98.9, validation_method="blast",
+                            validated_reads=780, total_reads=800, percent_validated=97.5)
+    mm2 = SimpleNamespace(sample_id="s1", taxid=13373, status=ValidationStatus.PARTIAL,
+                          percent_identity_mean=97.0, validation_method="minimap2",
+                          validated_reads=700, total_reads=800, percent_validated=87.5)
+    for order in ([blast, mm2], [mm2, blast]):
+        parser = SimpleNamespace(has_validation_data=lambda: True,
+                                 get_validation_results=lambda o=order: o)
+        with patch("nanometa_live.core.parsers.blast_validation_parser.get_validation_parser",
+                   return_value=parser):
+            lookup = dh._load_validation_lookup("/x")
+        assert lookup[("s1", 13373)]["method"] == "blast"
+
+
+def test_badge_names_identity_and_sample_count():
+    from nanometa_live.app.components.pathogen_alert import _validation_badge
+
+    def text(node):
+        children = getattr(node, "children", None)
+        if isinstance(children, str):
+            return children
+        return " ".join(text(c) if not isinstance(c, str) else c
+                        for c in (children or []))
+
+    badge = _validation_badge({"status": "confirmed", "identity": 97.2,
+                               "n_best": 1, "n_samples": 3})
+    label = text(badge)
+    assert "97% identity" in label
+    assert "1 of 3 samples" in label

@@ -445,12 +445,23 @@ def _format_criteria_text(config):
     identity = f"{ValidationParser.MIN_IDENTITY_THRESHOLD:.0f}%"
     partial = f"{ValidationParser.PARTIAL_THRESHOLD:.0f}%"
 
+    from nanometa_live.core.parsers.blast_validation_parser import (
+        MIN_BREADTH_FOR_CONFIRMED, MIN_READS_FOR_CONFIRMED,
+    )
+    # Every rule determine_status applies, so a Partial beside a high hit
+    # rate has a stated reason; MAPQ is a counting filter in the pipeline,
+    # not a status rule (an organism at average MAPQ 3 read as if it had to
+    # clear it).
     return (
-        f"Confirmed: hit rate >= {confirmed} of classified reads "
-        f"AND mean identity >= {identity}. "
+        f"Confirmed: hit rate >= {confirmed} of classified reads, "
+        f"mean identity >= {identity} and at least "
+        f"{MIN_READS_FOR_CONFIRMED} validated reads; coverage results must "
+        f"also cover at least {MIN_BREADTH_FOR_CONFIRMED * 100:.0f}% of the "
+        f"reference genome (focused, amplicon-like coverage excepted). "
         f"Partial: hit rate >= {partial}. "
         f"Low Confidence: below that. "
-        f"Minimap2 also requires alignment MAPQ >= {mapq_str}."
+        f"Minimap2 alignments with MAPQ >= {mapq_str} are counted "
+        f"(pipeline setting minimap2_min_mapq)."
     )
 
 

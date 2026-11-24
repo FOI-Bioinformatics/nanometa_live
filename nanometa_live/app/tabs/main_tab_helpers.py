@@ -13,7 +13,7 @@ import logging
 
 import pandas as pd
 
-from nanometa_live.core.taxonomy.ranks import is_species_rank
+from nanometa_live.core.taxonomy.ranks import is_species_rank, count_organisms_found  # noqa: F401  (re-exported)
 from dash import html
 import dash_bootstrap_components as dbc
 
@@ -224,44 +224,6 @@ def filter_detected_species(kraken_df, watchlist: list, entries_snapshot=None) -
     return result_df.to_dict('records')
 
 
-def count_organisms_found(kraken_df) -> int:
-    """The Organisms tab's "Organisms Found": species with reads, plus genera
-    whose reads resolve no further than the genus.
-
-    Counts cumulative reads, so a species whose reads all sit in its
-    subspecies is found (the direct ``reads`` column is 0 there), and a genus
-    is counted only when none of its species carries reads -- otherwise a
-    genus with a few unresolved reads was a second organism beside its own
-    species. Species are linked to their genus through ``parent_taxid``;
-    without that column every genus with reads is counted as before.
-    """
-    if kraken_df is None or kraken_df.empty:
-        return 0
-    col = "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
-    ranks = kraken_df["rank"].astype(str).str.strip()
-    reads = kraken_df[col].fillna(0).astype(int)
-    taxids = kraken_df["taxid"].fillna(0).astype(int)
-    present = (reads > 0) & (taxids > 1)
-
-    species = taxids[present & (ranks == "S")].tolist()
-    genera = set(taxids[present & (ranks == "G")].tolist())
-
-    if "parent_taxid" in kraken_df.columns:
-        parent = dict(zip(taxids.tolist(),
-                          kraken_df["parent_taxid"].fillna(0).astype(int).tolist()))
-        rank_of = dict(zip(taxids.tolist(), ranks.tolist()))
-        covered = set()
-        for tid in species:
-            node, hops = parent.get(tid), 0
-            while node and node not in covered and hops < 50:
-                if rank_of.get(node) == "G":
-                    covered.add(node)
-                    break
-                node, hops = parent.get(node), hops + 1
-        genera -= covered
-    return len(species) + len(genera)
-
-
 def _entries_from_snapshot(entries_snapshot):
     """Active entries rebuilt from the ``watchlist-entries-snapshot`` Store.
 
@@ -466,7 +428,8 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list,
     return result
 
 
-def build_organism_export(table_data: list, export_format: str, filename: str = "") -> dict:
+def build_organism_export(table_data: list, export_format: str, filename: str = "",
+                          total_reads=None, sample=None) -> dict:
     """Build the dcc.Download payload for an organism-table export.
 
     Pure given the table rows + format. Returns a dict with ``content`` /
@@ -515,8 +478,12 @@ def build_organism_export(table_data: list, export_format: str, filename: str = 
             "=" * 60,
             "",
             f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            f"  Total Organisms: {len(df)}",
-            f"  Total DNA Sequences: {df['reads'].sum():,}",
+            f"  Sample: {sample or 'All Samples'}",
+            # Rows across ranks: a genus row already contains its species,
+            # so neither the row count nor the summed reads is a total.
+            f"  Rows listed: {len(df)}",
+            ("  Total DNA Sequences: "
+             + (f"{int(total_reads):,}" if total_reads else "not available")),
             "",
             "-" * 60,
             "  TOP ORGANISMS BY ABUNDANCE",
@@ -547,7 +514,8 @@ def build_organism_export(table_data: list, export_format: str, filename: str = 
             "  NOTES:",
             "  - Sp. = Species, Gen. = Genus, Fam. = Family",
             "  - Reads = Number of DNA sequences classified",
-            "  - % = Percentage of total classified sequences",
+            "  - % = share of all reads in the sample (a rank's reads include",
+            "    those of the ranks below it)",
             "",
             "=" * 60,
             "                    END OF REPORT",
@@ -634,3 +602,18 @@ def not_detected_caveat(
         f"- too few to rule these organisms out. Screening is inconclusive "
         f"at this depth, not negative."
     )
+
+
+def resolve_min_abundance(value, default=0.1):
+    """The Organisms filter's minimum abundance (%), from the input box.
+
+    Only an empty box falls back to the default: ``value or 0.1`` turned a
+    typed 0 into 0.1, so the filter could not be switched off. Negative
+    values clamp to 0.
+    """
+    if value is None or value == "":
+        return float(default)
+    try:
+        return max(float(value), 0.0)
+    except (TypeError, ValueError):
+        return float(default)
