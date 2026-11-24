@@ -310,7 +310,7 @@ def test_read_set_note_flags_a_mismatch():
     from nanometa_live.app.tabs.qc_tab_helpers import read_set_note
     caption, mismatch = read_set_note(49860, 76642)
     assert caption == "Based on 49,860 reads measured by SeqKit"
-    assert "Kraken2 classified 76,642 reads" in mismatch
+    assert "Kraken2 processed 76,642 reads (classified and unclassified)" in mismatch
     assert "do not describe the same set of reads" in mismatch
 
 

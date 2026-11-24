@@ -401,8 +401,9 @@ def read_set_note(seqkit_reads, kraken_reads):
     if abs(seqkit_reads - kraken_reads) <= max(10, 0.01 * kraken_reads):
         return caption, None
     return caption, (
-        f"Kraken2 classified {kraken_reads:,} reads. The two counts come from "
-        "different files and do not describe the same set of reads."
+        f"Kraken2 processed {kraken_reads:,} reads (classified and "
+        "unclassified). The two counts come from different files and do not "
+        "describe the same set of reads."
     )
 
 

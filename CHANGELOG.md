@@ -60,7 +60,8 @@ v0.18.0).
   bases sat beside 76,642 classified reads (834 bp a read) and a mean
   length of 1,282 bp, because SeqKit had measured about 49,900 of them.
   The Base Quality and Read Statistics cards now name their SeqKit read
-  count and, when Kraken2's count differs by more than 1% (and 10 reads),
+  count and, when the number of reads Kraken2 processed (classified and
+  unclassified) differs by more than 1% (and 10 reads),
   say that the two describe different sets of reads
   (`qc_tab_helpers.read_set_note`).
 

@@ -269,7 +269,7 @@ def test_seqkit_cards_name_their_read_set(qc_app, tmp_path, _fresh_loaders, outp
         card = fn(f"fp-{output_id}", "barcode01", 0, "qc-tab", config, {})
     text = _text(card)
     assert "Based on 100 reads measured by SeqKit" in text
-    assert "Kraken2 classified 200 reads" in text
+    assert "Kraken2 processed 200 reads (classified and unclassified)" in text
 
 
 def test_stage_strip_removed_share_is_chopper_own_pair(qc_app, tmp_path, _fresh_loaders):
