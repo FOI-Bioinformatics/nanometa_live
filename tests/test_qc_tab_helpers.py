@@ -274,36 +274,14 @@ class TestPlaceholders:
 
 
 # --------------------------------------------------------------------------- #
-# Reads before filtering: fastp's own count, else chopper's (Barcelona
-# exercise feedback, 2026-11-24)
+# Read-filtering lines when the filter reports no per-reason breakdown
+# (Barcelona exercise feedback, 2026-11-24)
 # --------------------------------------------------------------------------- #
 
 def _chopper_counts_file(root, sample, text):
     d = root / "chopper" / sample / "counts"
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{sample}.1.chopper_counts.txt").write_text(text)
-
-
-def test_prefilter_prefers_fastp(tmp_path):
-    from nanometa_live.app.tabs.qc_tab_helpers import prefilter_read_count
-    _chopper_counts_file(tmp_path, "barcode01", "Kept 120 reads out of 150 reads\n")
-    assert prefilter_read_count(str(tmp_path), "barcode01",
-                                {"total_reads_before": 500}) == 500
-
-
-def test_prefilter_uses_chopper_counts(tmp_path):
-    from nanometa_live.app.tabs.qc_tab_helpers import prefilter_read_count
-    from nanometa_live.core.utils.chopper_counts import clear_chopper_counts_cache
-    clear_chopper_counts_cache()
-    _chopper_counts_file(tmp_path, "barcode01", "Kept 120 reads out of 150 reads\n")
-    assert prefilter_read_count(str(tmp_path), "barcode01",
-                                {"total_reads_before": 0}) == 150
-    assert prefilter_read_count(str(tmp_path), "barcode01") == 150
-
-
-def test_prefilter_none_without_either(tmp_path):
-    from nanometa_live.app.tabs.qc_tab_helpers import prefilter_read_count
-    assert prefilter_read_count(str(tmp_path), "barcode01", {}) is None
 
 
 def test_stat_lines_without_removal_breakdown_say_not_recorded():

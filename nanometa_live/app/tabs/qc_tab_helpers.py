@@ -415,23 +415,6 @@ def with_read_set_note(card, seqkit_reads, kraken_reads):
     return html.Div([card, *lines])
 
 
-def prefilter_read_count(main_dir, sample, fastp_stats=None):
-    """Reads that entered the read filter, or None when nothing recorded them.
-
-    fastp reports its own input count; chopper's comes from the counts files
-    nanometanf publishes beside its output (``chopper_counts``). Filtlong
-    records none. SeqKit and Kraken2 both see the filtered reads, so neither
-    can stand in for this number.
-    """
-    before = int((fastp_stats or {}).get("total_reads_before", 0) or 0)
-    if before > 0:
-        return before
-    from nanometa_live.core.utils.chopper_counts import load_chopper_counts
-
-    counts = load_chopper_counts(main_dir, sample)
-    return counts.reads_in if counts else None
-
-
 def compute_qc_stat_lines(
     *,
     tot_reads_pre_filt: int,

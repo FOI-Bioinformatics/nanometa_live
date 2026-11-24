@@ -56,7 +56,6 @@ from nanometa_live.app.tabs.qc_tab_helpers import (  # noqa: E402
     _get_empty_qc_figures,
     _kreport_sample_name,
     compute_qc_stat_lines,
-    prefilter_read_count,
     with_read_set_note,
     build_qc_figures,
     aggregate_fastp_read_stats,
@@ -1064,9 +1063,12 @@ def register_qc_callbacks(app: Dash):
                 tot_reads_pre_filt = fastp_stats["total_reads_before"]
                 tot_passed_reads = fastp_stats["total_reads_after"]
 
-            if not tot_reads_pre_filt:
-                tot_reads_pre_filt = prefilter_read_count(
-                    main_dir, selected_sample, fastp_stats) or 0
+            chopper = (None if tot_reads_pre_filt
+                       else load_chopper_counts(main_dir, selected_sample))
+            if chopper:
+                # chopper's input and kept counts are one measured pair;
+                # its input over SeqKit's (lagging) count is not a pass rate.
+                tot_reads_pre_filt, tot_passed_reads = chopper.reads_in, chopper.reads_kept
 
             kraken_df = load_kraken_data(main_dir, selected_sample)
 

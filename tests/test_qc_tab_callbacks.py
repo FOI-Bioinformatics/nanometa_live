@@ -288,3 +288,22 @@ def test_stage_strip_removed_share_is_chopper_own_pair(qc_app, tmp_path, _fresh_
     text = _text(strip)
     assert "20.0% removed" in text
     assert "33.3% removed" not in text
+
+
+def test_guidance_pairs_chopper_input_with_chopper_kept(qc_app, tmp_path, _fresh_loaders):
+    """With SeqKit lagging (60 of chopper's 120 kept), the banner must judge
+    chopper's own pair 120/150, not 60/150 (final review, 2026-11-24)."""
+    config = _chopper_tree(tmp_path)
+    (tmp_path / "seqkit" / "barcode01.tsv").write_text(_SEQKIT.replace("\t120\t120000\t", "\t60\t60000\t"))
+    _backdate(str(tmp_path))
+    fn = get_callback_fn(qc_app, "qc-action-guidance-container")
+    seen = {}
+
+    def spy(pre_filter, passed, classified, total_classified_input):
+        seen.update(pre_filter=pre_filter, passed=passed)
+        return [], False
+
+    with patch.object(qc_mod, "qc_guidance_issues", spy), \
+            ctx_trigger("results-fingerprint"):
+        fn("fp-guide-lag", "barcode01", 0, config)
+    assert seen == {"pre_filter": 150, "passed": 120}
