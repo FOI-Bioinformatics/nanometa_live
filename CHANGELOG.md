@@ -63,6 +63,15 @@ v0.18.0).
   say that the two describe different sets of reads
   (`qc_tab_helpers.read_set_note`).
 
+### Added
+
+- `scripts/field_run_triage.py RESULTS_DIR [--json]`: every per-sample read
+  count the GUI could show (Kraken2, SeqKit merged and per batch, chopper's
+  input and kept counts) side by side, the samples whose counts describe
+  different reads, and the run's outcome, failed tasks, lost-input markers
+  and the pipeline's file-size read estimate. For reading a results folder
+  brought back from the field.
+
 ## [0.20.0] - 2026-11-24
 
 **Requires nanometanf v1.12.0**: this release sends a digit-only sample
