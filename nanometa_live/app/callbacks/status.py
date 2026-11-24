@@ -285,6 +285,10 @@ def register_status(app, backend_manager):
 
         # Check if in visualization-only mode
         if config and config.get("visualization_only", False):
+            prev = previous_run_status(resolve_outdir_for_fingerprint(config))
+            if prev is not None:
+                return ("blue", "VIEWING",
+                        "Visualization mode - " + previous_run_header(prev)[2])
             return "blue", "VIEWING", "Visualization mode - displaying existing results"
 
         if status.get("running", False):

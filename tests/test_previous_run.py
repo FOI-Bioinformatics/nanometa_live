@@ -139,3 +139,21 @@ def test_verdict_tile_shows_the_last_runs_duration(tmp_path):
     assert out[2] == "03:12:00"
     assert out[3] == "COMPLETE"
     assert out[4] == "info"
+
+
+def test_visualization_mode_names_the_run(tmp_path):
+    """A --main_dir launch takes the VIEWING branch, not STANDBY; it names
+    the run too (found in the live check of 2026-11-24)."""
+    d = _results(tmp_path, **COMPLETED)
+    config = {**_config(d), "visualization_only": True}
+    _color, text, details = _status_fn()({"running": False}, config)
+    assert text == "VIEWING"
+    assert "Completed at 12:12" in details
+
+
+def test_visualization_mode_without_metadata_is_unchanged(tmp_path):
+    d = tmp_path / "results"
+    d.mkdir()
+    config = {**_config(d), "visualization_only": True}
+    _color, text, details = _status_fn()({"running": False}, config)
+    assert (text, details) == ("VIEWING", "Visualization mode - displaying existing results")
