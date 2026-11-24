@@ -206,7 +206,7 @@ class TestUploadCallback:
         assert state["last_update"] == "upload-field.yaml"
         # The session manager is told to load the persisted file, or the
         # organisms would not appear until the next restart.
-        manager._load_custom_yaml_file.assert_called_once_with(str(saved))
+        manager.reload_custom_yaml_file.assert_called_once_with(str(saved))
         text = _alert_text(alert)
         assert "Imported: field.yaml" in text
         assert "2 pathogens" in text
@@ -301,7 +301,7 @@ class TestImportWorkerIsolation:
         assert result["success"] is True
         assert result["count"] == 2
         assert result["dest_name"] == "field.yaml"
-        manager._load_custom_yaml_file.assert_not_called()
+        manager.reload_custom_yaml_file.assert_not_called()
         assert len(progress_calls) >= 2, "the worker must report progress"
 
     def test_worker_result_for_missing_pending_file(
@@ -412,7 +412,7 @@ class TestReplaceFlow:
         assert cleared is None
         # Activation runs for the replacement too (snapshot rehydration
         # depends on the tab-state write; the manager reload on this call).
-        assert manager._load_custom_yaml_file.call_count == 2
+        assert manager.reload_custom_yaml_file.call_count == 2
         # The consumed pending file is gone.
         assert not (user_wl_dir / ".pending" / "field.yaml").exists()
 

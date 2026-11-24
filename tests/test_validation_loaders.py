@@ -149,6 +149,21 @@ class TestOnDiskBlastSupplementsAggregate:
         )
         assert out[632]["validated_reads"] == 7
 
+    def test_minimap2_only_aggregate_entry_does_not_hide_disk_blast(self, tmp_path):
+        """The same pair listed in the aggregate by minimap2 alone (no BLAST
+        fields) blocked the on-disk blast.tsv: the badge read "Not Verified"
+        for an organism BLAST confirmed (live test 2026-11-24). The disk
+        BLAST fills the BLAST fields; the minimap2 fields stay."""
+        _aggregate(tmp_path, {"barcode01": {"562": {
+            "kraken_reads": 10, "minimap2_mapped": 9, "minimap2_hit_rate": 0.9,
+            "minimap2_identity": 98.0, "avg_mapq": 55, "minimap2_status": "confirmed",
+        }}})
+        self._disk_blast(tmp_path, "barcode01", 562, reads=9)
+        out = load_blast_validation_data(str(tmp_path), WATCHLIST)
+        assert out[562]["validated_reads"] == 9
+        assert out[562]["status"] != "no_data"
+        assert out[562]["minimap2_status"] == "confirmed"
+
     def test_taxid_prefixed_filename_is_matched(self, tmp_path):
         # No aggregate at all: only the current-pipeline naming on disk.
         self._disk_blast(tmp_path, "barcode01", 562, reads=3)

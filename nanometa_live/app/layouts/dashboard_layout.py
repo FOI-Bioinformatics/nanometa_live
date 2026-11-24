@@ -137,7 +137,9 @@ def create_dashboard_layout():
                         "padding": "24px 32px",
                         "minHeight": "120px",
                     },
-                    className="mb-3",
+                    # Light background in both themes; dark ink in dark mode
+                    # (styles.css, "ALARM SURFACES IN DARK MODE").
+                    className="mb-3 on-light-surface",
                     role="status",
                     **{"aria-live": "polite"}
                 )

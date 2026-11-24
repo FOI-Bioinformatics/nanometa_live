@@ -677,6 +677,19 @@ class WatchlistManager:
             except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, yaml.YAMLError, KeyError, ValueError, TypeError, AttributeError) as e:
                 logger.exception(f"Failed to load watchlist {watchlist_id}: {e}")
 
+    def reload_custom_yaml_file(self, file_path: str) -> None:
+        """Load a custom watchlist file, replacing its earlier contribution.
+
+        An entry the new file no longer lists stops being screened; an entry
+        another enabled list also provides stays (``disable_watchlist``
+        removes only this list's contribution). Loading on top of the old
+        version left removed organisms screened until restart.
+        """
+        watchlist_id = Path(file_path).stem
+        if watchlist_id in self._enabled_watchlists:
+            self.disable_watchlist(watchlist_id)
+        self._load_custom_yaml_file(file_path)
+
     def _load_custom_yaml_file(self, file_path: str) -> None:
         """Load a custom YAML watchlist file by path."""
         path = Path(file_path)

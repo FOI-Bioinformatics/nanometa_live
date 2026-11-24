@@ -496,7 +496,8 @@ def HighRiskPathogenAlert(
                "borderLeft": f"6px solid {threat['border_color']}",
                "borderRadius": "8px"
            })
-    ], className="mb-3", role="alert")
+    # Light card background in both themes: dark ink in dark mode.
+    ], className="mb-3 on-light-surface", role="alert")
 
 
 def WatchedSpeciesAlert(
@@ -563,7 +564,7 @@ def WatchedSpeciesAlert(
     return html.Div([
         html.Div(
             inner_children,
-            className="p-2",
+            className="p-2 on-light-surface",
             style={
                 "backgroundColor": threat["bg_color"],
                 # 6px left-border + 8px radius matches the

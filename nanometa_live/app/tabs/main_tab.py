@@ -317,6 +317,10 @@ def register_main_callbacks(app: Dash):
             # mode emits one fingerprint advance per chunk file).
             State("dashboard-overall-status-cache", "data"),
             State("main-results-rendered-fp", "data"),
+            # The worker's WatchlistManager singleton is empty; threat
+            # levels and database taxids for the watched cards come from
+            # the main process through this Store.
+            State("watchlist-entries-snapshot", "data"),
         ],
         prevent_initial_call=True,
         # Audit item #3 (docs/audit/threading-2026-05-10.md): heavy kraken
@@ -332,7 +336,7 @@ def register_main_callbacks(app: Dash):
     def update_main_results(
         _due, _fingerprint, apply_clicks, selected_sample, watchlist_store,
         top_count, min_abundance, tax_ranks, config, status,
-        overall_status_cache, rendered_fp,
+        overall_status_cache, rendered_fp, entries_snapshot=None,
     ):
         """
         Update the main results tab with organism summary, cards, table,
@@ -477,10 +481,12 @@ def register_main_callbacks(app: Dash):
             )
 
             # Check for watched species in the data (detected only - for alert)
-            detected_watched = filter_detected_species(kraken_df, watchlist)
+            detected_watched = filter_detected_species(
+                kraken_df, watchlist, entries_snapshot=entries_snapshot)
 
             # Get ALL watchlist entries with detection status (for display)
-            all_watchlist_species = get_all_watchlist_with_detection(kraken_df, watchlist)
+            all_watchlist_species = get_all_watchlist_with_detection(
+                kraken_df, watchlist, entries_snapshot=entries_snapshot)
 
             # Create alert banner if watched species detected
             alert_banner = None

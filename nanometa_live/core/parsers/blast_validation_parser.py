@@ -780,7 +780,18 @@ class ValidationParser:
         """
         if batch_id:
             from nanometa_live.core.parsers.validation_batch import collect_batch_results
-            return collect_batch_results(self.results_dir, batch_id, sample, taxid, self.parse_blast_tabular)
+            batch_results = collect_batch_results(
+                self.results_dir, batch_id, sample, taxid, self.parse_blast_tabular)
+            # Batch files often carry no species name; the cumulative results
+            # for the same taxid do.
+            if any(not getattr(r, "species", "") for r in batch_results):
+                names = {r.taxid: r.species
+                         for r in self.get_validation_results(sample=sample, taxid=taxid)
+                         if getattr(r, "species", "")}
+                for r in batch_results:
+                    if not getattr(r, "species", "") and r.taxid in names:
+                        r.species = names[r.taxid]
+            return batch_results
 
         # Round 3: a filtered call runs the UNFILTERED parse (populating
         # the shared cache) and subsets in memory. The old path parsed the

@@ -612,7 +612,10 @@ def _lookup_organism_reads(taxids: Any, config: Dict[str, Any],
                     if match.empty:
                         continue
                     row = match.iloc[0]
-                    out["reads_int"] = int(row.get('reads', 0))
+                    # Cumulative (clade) reads, as on the cards: a species
+                    # whose reads all sit in its subspecies has 0 direct
+                    # reads and the modal said "0 sequences detected".
+                    out["reads_int"] = int(row.get('cumul_reads', row.get('reads', 0)) or 0)
                     out["reads"] = f"{out['reads_int']:,}"
                     out["abundance"] = f"{row.get('%', 0):.1f}%"
                     out["name"] = str(row.get("name", "")).strip()

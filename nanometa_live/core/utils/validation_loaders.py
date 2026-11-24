@@ -345,7 +345,13 @@ def _load_blast_validation_data_uncached(
         if not candidates:
             continue
 
-        if any(c in results for c in candidates):
+        # A tier above that MEASURED BLAST wins. An entry without a BLAST
+        # measurement (status no_data: a minimap2-only aggregate row) must
+        # not hide the on-disk blast.tsv -- the badge read "Not Verified"
+        # for an organism BLAST confirmed (live test 2026-11-24). The disk
+        # result then fills the BLAST fields and the minimap2 ones stay.
+        existing = next((results[c] for c in candidates if c in results), None)
+        if existing is not None and existing.get("status") != "no_data":
             continue
 
         # Find BLAST result files for this taxid. nanometanf names them with
@@ -421,9 +427,13 @@ def _load_blast_validation_data_uncached(
             'validation_rate': round(validation_rate, 1),
             'status': status
         }
+        if existing is not None:
+            if not blast_files:
+                continue  # nothing on disk either: keep the existing entry
+            result_entry = {**existing, **result_entry}
         # Key under every candidate id so the organism card finds it whether
         # it looks up by the displayed db taxid or the NCBI taxid.
         for key in candidates:
-            results.setdefault(key, result_entry)
+            results[key] = result_entry
 
     return results

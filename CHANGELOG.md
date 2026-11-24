@@ -630,6 +630,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a hover line naming the watchlist entry and threat level, a red outline in
   the Sunburst and a red node in the Sankey.
 
+- Dark mode keeps the alarm readable. The verdict banner and the pathogen
+  alert cards keep their light backgrounds, but their text took the dark
+  theme's light ink: "ACTION REQUIRED" was near-white on pale pink and the
+  organism names on the cards were almost invisible. These surfaces now keep
+  dark ink in dark mode.
+- Configuration > Reset keeps the session's identity: its data and project
+  folders, offline mode, port and visualization mode. It replaced app-config
+  with bare defaults, which switched Offline off and sent every later
+  session write to ~/.nanometa instead of the project.
+- Configuration > Load lists the saved configurations. "Save for Later"
+  wrote to a folder Load never listed, and the list was gated on a
+  process-wide timestamp, so after a page reload Load said "No saved
+  configurations found", even for the last session.
+- A failed assembly is named on the Reports tab. The lookup read a
+  "process" key the lost-input markers do not carry ("stage"), and a
+  failure was checked after "not enabled".
+- The Organisms-tab BLAST badge shows a BLAST confirmation when the
+  aggregate lists the same pair by minimap2 only; it read "Not Verified".
+- The single-batch BLAST view reads each batch's stats sidecar: every result
+  read "Unknown, 0 of 0, Low Confidence". BLAST results built from files are
+  named from the sidecar.
+- The Pathogen Report modal counts a species' cumulative reads: a species
+  whose reads sit in its subspecies read "0 sequences detected".
+- Watched-organism cards show their threat level, category and annotation.
+  They are built in a background worker whose watchlist is empty, and every
+  card read "Unknown"; they now use the watchlist snapshot.
+- Replacing an uploaded watchlist replaces what it screens: the removed
+  entries stayed active until restart.
+
 ### Changed
 
 - The Taxonomy charts colour by lineage by default: each top-level branch

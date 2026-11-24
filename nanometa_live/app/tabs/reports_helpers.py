@@ -244,10 +244,6 @@ def _assembly_absent_panel(enabled: Optional[bool],
                    "and declined rather than publishing contigs that would "
                    "read as a genome.", className="small text-muted mb-3"),
         ] + _declined_rows(declined))
-    if enabled is False:
-        return _assembly_absent_card(
-            dbc.Badge("Assembly not enabled", color="light",
-                      text_color="muted", className="border"))
     if failed:
         more = f" +{len(failed) - 3} more" if len(failed) > 3 else ""
         return _assembly_absent_card([
@@ -259,6 +255,12 @@ def _assembly_absent_panel(enabled: Optional[bool],
                 "without it. See the run log.",
                 className="small"),
         ])
+    # A recorded failure outranks "not enabled": the caller may not know
+    # whether assembly was on, but a marker proves a task ran and failed.
+    if enabled is False:
+        return _assembly_absent_card(
+            dbc.Badge("Assembly not enabled", color="light",
+                      text_color="muted", className="border"))
     if enabled:
         return _assembly_absent_card(
             html.Span("Assembly is enabled; no results yet.",

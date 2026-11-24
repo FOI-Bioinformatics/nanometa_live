@@ -736,3 +736,21 @@ def pin_running_run_paths(config, current_config, backend_status) -> bool:
             config[key] = live
     return True
 
+
+
+#: Keys that describe the session rather than the analysis: where it keeps
+#: its state, whether it may use the network, how it was launched. Reset
+#: restores analysis settings and keeps these.
+SESSION_IDENTITY_KEYS = (
+    "data_dir", "project_dir", "nanometa_home", "genome_cache_dir",
+    "offline_mode", "gui_port", "visualization_only", "main_dir",
+)
+
+
+def reset_preserving_session(defaults, current):
+    """``defaults`` with the session-identity keys carried over from ``current``."""
+    out = dict(defaults or {})
+    for key in SESSION_IDENTITY_KEYS:
+        if current and key in current:
+            out[key] = current[key]
+    return out

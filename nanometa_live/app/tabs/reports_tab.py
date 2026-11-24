@@ -64,7 +64,9 @@ def _assembly_failed_tasks(results_dir):
         return sorted({
             str(m.get("sample") or "?")
             for m in (read_lost_inputs(results_dir) or [])
-            if any(t in str(m.get("process", "")).upper()
+            # read_lost_inputs returns the process as "stage"; matching a
+            # "process" key found nothing and a failed FLYE was never named.
+            if any(t in str(m.get("stage") or m.get("process") or "").upper()
                    for t in ("FLYE", "MINIASM", "MINIMAP2_AVA"))
         })
     except Exception:

@@ -112,7 +112,7 @@ def remove_species_from_watchlist(taxid: int, watchlist: list) -> list:
     return [s for s in watchlist if s.get("taxid") != taxid]
 
 
-def filter_detected_species(kraken_df, watchlist: list) -> list:
+def filter_detected_species(kraken_df, watchlist: list, entries_snapshot=None) -> list:
     """
     Filter detected species from kraken data that are in the watchlist.
 
@@ -126,9 +126,12 @@ def filter_detected_species(kraken_df, watchlist: list) -> list:
     if kraken_df is None or kraken_df.empty:
         return []
 
-    # Get WatchlistManager and active entries
+    # Get WatchlistManager and active entries (the snapshot stands in for
+    # the empty singleton of a background worker).
     manager = get_watchlist_manager()
     active_entries = manager.get_active_entries()
+    if not active_entries and entries_snapshot:
+        active_entries = _entries_from_snapshot(entries_snapshot)
 
     # Guard on BOTH sources, matching get_all_watchlist_with_detection. The
     # two are required to agree -- this function drives the alert banner and
@@ -259,7 +262,36 @@ def count_organisms_found(kraken_df) -> int:
     return len(species) + len(genera)
 
 
-def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
+def _entries_from_snapshot(entries_snapshot):
+    """Active entries rebuilt from the ``watchlist-entries-snapshot`` Store.
+
+    A background worker's WatchlistManager singleton is empty (CLAUDE.md,
+    "Background callback isolation"); the snapshot is the main process's
+    copy. Keyed like the manager, by (taxid, db_taxid), so entries sharing
+    an NCBI taxid stay distinct. Disabled entries are left out.
+    """
+    from types import SimpleNamespace
+    out = {}
+    for e in entries_snapshot or []:
+        if not e.get("enabled", True):
+            continue
+        level = e.get("threat_level")
+        out[(e.get("taxid"), e.get("db_taxid"))] = SimpleNamespace(
+            taxid=e.get("taxid"),
+            db_taxid=e.get("db_taxid"),
+            name=e.get("name", ""),
+            names_alt=e.get("names_alt", []),
+            threat_level=SimpleNamespace(value=level) if level else None,
+            category=e.get("category") or "custom",
+            organism_type=e.get("organism_type"),
+            annotation=e.get("annotation") or "",
+            enabled=True,
+        )
+    return out
+
+
+def get_all_watchlist_with_detection(kraken_df, watchlist: list,
+                                     entries_snapshot=None) -> list:
     """
     Get ALL watchlist entries with their detection status from Kraken2 data.
 
@@ -267,10 +299,15 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
     regardless of detection status. Undetected entries have reads=0.
 
     This provides complete visibility into what's being monitored.
+
+    ``entries_snapshot`` (the watchlist-entries-snapshot Store) stands in for
+    the manager when its singleton is empty, as it is in a background worker.
     """
     # Get WatchlistManager and active entries
     manager = get_watchlist_manager()
     active_entries = manager.get_active_entries()
+    if not active_entries and entries_snapshot:
+        active_entries = _entries_from_snapshot(entries_snapshot)
 
     if not active_entries and not watchlist:
         return []

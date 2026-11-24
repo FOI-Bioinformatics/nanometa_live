@@ -1979,7 +1979,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
         manager = get_watchlist_manager()
         dest_file = Path(result.get("dest_dir", "")) / result.get("dest_name", "")
         if dest_file.exists():
-            manager._load_custom_yaml_file(str(dest_file))
+            # Reload, not add: a replaced file's removed entries must stop
+            # being screened (live test 2026-11-24).
+            manager.reload_custom_yaml_file(str(dest_file))
 
         filename = result.get("filename", "")
         return {"last_update": f"upload-{filename}"}, _render_import_result(result)

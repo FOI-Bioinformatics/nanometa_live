@@ -8,7 +8,6 @@ users to configure the application before starting the analysis.
 import logging
 import os
 import json
-import threading
 from typing import List
 from datetime import datetime
 
@@ -30,8 +29,6 @@ from nanometa_live.app.app import background_callback_manager
 # because saved-config detection is independent of pipeline output files);
 # rather than re-walking the directory each time, we only re-emit when the
 # directory's mtime has advanced (i.e. the user saved or deleted a config).
-_configs_dir_mtime: float = -1.0
-_configs_dir_mtime_lock = threading.Lock()
 
 
 # _build_config_list_items extracted to config_tab_helpers.py; re-exported so the
@@ -40,6 +37,7 @@ from nanometa_live.app.tabs.config_tab_helpers import (  # noqa: E402
     optional_int,
     _build_config_list_items,
     autosave_session_config,
+    reset_preserving_session,
     build_config_from_form,
     config_form_dirty,
     pin_running_run_paths,
@@ -178,39 +176,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         return no_update
 
     @app.callback(
-        Output("available-configs", "children"),
-        Input("update-interval", "n_intervals"),
-        State("app-config", "data"),
-    )
-    def update_available_configs(_, config):
-        """Update the list of available configurations.
-
-        Gated on the configs/ directory mtime so the per-tick os.walk and
-        YAML-metadata read only run when the operator actually saved,
-        renamed, or removed a configuration. Resolves the configs dir via
-        NanometaPaths so it follows the project scope (project-local).
-        """
-        if not config:
-            return "[]"
-
-        from nanometa_live.core.utils.paths import NanometaPaths
-        configs_dir = str(NanometaPaths.from_config(config).configs)
-        try:
-            mt = os.stat(configs_dir).st_mtime if os.path.isdir(configs_dir) else 0.0
-        except OSError:
-            mt = 0.0
-
-        global _configs_dir_mtime
-        with _configs_dir_mtime_lock:
-            if mt == _configs_dir_mtime:
-                raise PreventUpdate
-            _configs_dir_mtime = mt
-
-        config_loader = ConfigLoader(configs_dir)
-        configs = config_loader.get_available_configs()
-        return json.dumps(configs)
-
-    @app.callback(
         Output("load-config-modal", "is_open"),
         [
             Input("load-config-button", "n_clicks"),
@@ -227,24 +192,34 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
     @app.callback(
         Output("load-config-list", "children"),
+        Output("available-configs", "children", allow_duplicate=True),
         Input("load-config-modal", "is_open"),
-        State("available-configs", "children"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
     )
-    def populate_load_config_list(is_open, available_configs_json):
-        """Populate the list of available configurations."""
-        if not is_open:
-            return no_update
+    def populate_load_config_list(is_open, app_config):
+        """List the saved configurations when the Load dialog opens.
 
+        Read from disk on open, and written into ``available-configs`` for
+        the load and delete handlers. The list used to come from a per-tick
+        callback gated on a PROCESS-wide directory mtime, so a reloaded page
+        (empty Store) saw "nothing changed" and Load showed no saved
+        configurations, not even the last session (live test 2026-11-24).
+        """
+        if not is_open:
+            return no_update, no_update
+
+        from nanometa_live.core.utils.paths import NanometaPaths
         try:
-            configs = json.loads(available_configs_json)
-        except (json.JSONDecodeError, TypeError) as e:
-            logging.debug(f"Could not parse configs JSON: {e}")
+            configs_dir = str(NanometaPaths.from_config(app_config or {}).configs)
+            configs = ConfigLoader(configs_dir).get_available_configs()
+        except Exception as e:  # noqa: BLE001 - an unreadable folder lists nothing
+            logging.debug(f"Could not list configurations: {e}")
             configs = []
 
         if not configs:
-            return [html.P("No saved configurations found.")]
-
-        return [dbc.ListGroup(_build_config_list_items(configs))]
+            return [html.P("No saved configurations found.")], json.dumps([])
+        return [dbc.ListGroup(_build_config_list_items(configs))], json.dumps(configs)
 
     @app.callback(
         [
@@ -462,8 +437,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             new_config = dict(config)  # Create a copy
             new_config["analysis_name"] = config_name
 
-            # Save the config using the ConfigLoader
-            config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
+            # Save where Load lists and the session autosave writes: the
+            # project-scoped configs folder. <data_dir>/configs was never
+            # listed, so a saved preset never appeared under Load.
+            from nanometa_live.core.utils.paths import NanometaPaths
+            config_loader = ConfigLoader(str(NanometaPaths.from_config(config).configs))
             filename = f"{config_name.replace(' ', '_').lower()}.yaml"
             config_path = config_loader.save_config(new_config, filename)
 
@@ -509,16 +487,25 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         ],
         Input("reset-config-confirm", "n_clicks"),
         State("app-data-dir", "data"),
+        State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def reset_config(n_clicks, data_dir):
-        """Reset the configuration to defaults after user confirms."""
+    def reset_config(n_clicks, data_dir, current_config):
+        """Reset the analysis settings to defaults after user confirms.
+
+        The session's identity survives: its data and project folders,
+        offline mode, port and visualization mode. Replacing app-config with
+        bare defaults switched Offline off on an air-gapped machine and sent
+        every later session write to ~/.nanometa instead of the project
+        (live test 2026-11-24).
+        """
         if not n_clicks:
             return (no_update,) * 5
 
         try:
             config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
-            reset_defaults = config_loader.create_default_config()
+            reset_defaults = reset_preserving_session(
+                config_loader.create_default_config(), current_config)
             # Apply persists to last-session.yaml; a confirmed Reset does the
             # same, so the file and the session cannot disagree afterwards.
             autosave_session_config(reset_defaults)

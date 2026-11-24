@@ -1470,6 +1470,13 @@ def register_preparation_callbacks(app):
                 # reported the entry "Not Found" while live detection
                 # matched it (2026-08-17 reaudit, G1/G2).
                 "db_taxid": e.get("db_taxid"),
+                # What the Organisms tab's watched cards show; its builder
+                # runs in a background worker whose singleton is empty, and
+                # without these every card read threat "Unknown".
+                "threat_level": e.get("threat_level"),
+                "category": e.get("category"),
+                "annotation": e.get("annotation"),
+                "organism_type": e.get("organism_type"),
             }
             for e in entries
         ]
