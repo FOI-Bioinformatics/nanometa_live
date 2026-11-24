@@ -82,3 +82,11 @@ def test_selector_label_changes_and_value_does_not():
     assert "unclassified" in by_value
     assert "unclassified (no barcode)" in by_value["unclassified"]
     assert "(no barcode)" not in by_value["barcode01"]
+
+
+def test_pathogen_report_modal_breakdown_labels_it():
+    from nanometa_live.app.tabs.dashboard_helpers import build_detection_meta
+    from test_pathogen_alert_rendering import _text
+    meta = build_detection_meta(sample_breakdown=[
+        {"sample": "unclassified", "reads": 300}, {"sample": "barcode01", "reads": 200}])
+    assert "unclassified (no barcode) (300 reads)" in _text(meta)

@@ -50,8 +50,9 @@ v0.18.0).
   A Japanese encephalitis detection was attributed to "unclassified,
   barcode11, barcode06": the reads MinKNOW could not assign to a barcode,
   shown as one more sample under a word Kraken2 uses for something else.
-  The sample selector, the alert-card chips and popover, the verdict banner
-  and the System Alerts now show "unclassified (no barcode)"
+  The sample selector, the alert-card chips and popover, the verdict banner,
+  the System Alerts, the Pathogen Report modal and the exported report now
+  show "unclassified (no barcode)"
   (`core/utils/sample_labels.py`); the sample's value, paths and keys are
   unchanged.
 - **The QC base-statistics cards say which reads they describe.** SeqKit's

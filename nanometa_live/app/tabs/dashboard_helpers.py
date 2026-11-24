@@ -22,6 +22,7 @@ import logging
 from dash import html
 import dash_bootstrap_components as dbc
 
+from nanometa_live.core.utils.sample_labels import display_sample_name
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
@@ -462,7 +463,8 @@ def build_detection_meta(
     if sample_breakdown:
         shown = sample_breakdown[:5]
         parts = [
-            f"{s['sample']} ({int(s.get('reads', 0)):,} reads)" for s in shown
+            f"{display_sample_name(s['sample'])} ({int(s.get('reads', 0)):,} reads)"
+            for s in shown
         ]
         overflow = len(sample_breakdown) - len(shown)
         if overflow > 0:

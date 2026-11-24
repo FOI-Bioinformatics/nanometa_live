@@ -919,3 +919,21 @@ class TestRunStateParity:
         assert "1 pipeline task failed and was skipped" in content
         assert "CHOPPER (barcode06_chunk3.fastq.gz)" in content
         assert "absent from every count" in content
+
+
+class TestUnassignedBarcodeLabel:
+    """The exported report names MinKNOW's unassigned folder for what it
+    holds (Barcelona exercise feedback; final review, finding 5)."""
+
+    def test_triggering_sample_is_labelled(self, generator, tmp_path):
+        row = {
+            "name": "Bacillus anthracis", "taxid": 1392, "threat_level": "critical",
+            "detected": True, "reads": 500, "abundance": 50.0,
+            "triggering_samples": [{"sample": "unclassified", "reads": 300},
+                                   {"sample": "barcode01", "reads": 200}],
+            "negative_control_rows": [], "control_only": False,
+        }
+        with patch.object(ReportGenerator, "_screen_watchlist", return_value=[row]):
+            report = generator.generate(str(tmp_path / "export"), include_raw=False)
+        html = report.read_text()
+        assert "unclassified (no barcode)" in html

@@ -599,6 +599,8 @@ class ReportGenerator:
         )
         env.filters["format_number"] = lambda v: f"{v:,}" if isinstance(v, (int, float)) else str(v)
         env.filters["format_pct"] = lambda v: f"{v:.1f}%" if isinstance(v, (int, float)) else str(v)
+        from nanometa_live.core.utils.sample_labels import display_sample_name
+        env.filters["sample_label"] = lambda v: display_sample_name(str(v))
 
         template = env.get_template("report.html")
 

@@ -444,7 +444,7 @@
                 <div style="color:#6c757d"><em>(negative control only)</em></div>
                 {% for s in w.negative_control_rows %}<div style="color:#6c757d">{{ s.sample }} (negative control, {{ s.reads | format_number }} reads)</div>{% endfor %}
               {% elif w.triggering_samples %}
-                {% for s in w.triggering_samples %}<div>{{ s.sample }}
+                {% for s in w.triggering_samples %}<div>{{ s.sample | sample_label }}
                   <span style="color:#6c757d">({{ s.reads | format_number }} reads)</span></div>{% endfor %}
                 {% if w.negative_control_rows %}
                 <div style="color:#6c757d; font-size:12px;">
@@ -773,7 +773,7 @@
         {% if data.config.get("qc_tool") %}
         <strong>QC Tool</strong> {{ data.config.get("qc_tool", "N/A") }}<br>
         {% endif %}
-        <strong>Samples</strong> {{ data.samples | join(", ") if data.samples else "Aggregated" }}
+        <strong>Samples</strong> {{ data.samples | map("sample_label") | join(", ") if data.samples else "Aggregated" }}
       </div>
     </div>
   </div>
