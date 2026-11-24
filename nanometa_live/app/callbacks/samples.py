@@ -24,6 +24,7 @@ from nanometa_live.app.utils.debounce import (
     interval_render_is_redundant, mark_rendered,
 )
 from nanometa_live.app.app import background_callback_manager
+from nanometa_live.core.utils.sample_labels import display_sample_name
 
 
 
@@ -323,7 +324,7 @@ def register_samples(app, backend_manager):
             age = age_seconds_for(last_ts, now)
             # Band, not seconds: the exact age is shown by the per-sample
             # freshness pills elsewhere; here it only has to stay stable.
-            parts = [html.Span(sample, className="text-truncate"),
+            parts = [html.Span(display_sample_name(sample), className="text-truncate"),
                      freshness_pill(sample, age, class_name="ms-2",
                                     label_override=_freshness_bucket(age))]
             parts.extend(_sample_state_badges(sample, dataless, progress))

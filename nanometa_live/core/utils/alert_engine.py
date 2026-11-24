@@ -15,6 +15,7 @@ from nanometa_live.core.utils.pathogen_database import (
     check_for_dangerous_pathogens,
 )
 from nanometa_live.core.utils.attribution import samples_for_detection
+from nanometa_live.core.utils.sample_labels import display_sample_name
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def _sample_suffix(sample_names: List[str], max_named: int = 3) -> str:
         return ""
     shown = sample_names[:max_named]
     overflow = len(sample_names) - len(shown)
-    suffix = " in " + ", ".join(shown)
+    suffix = " in " + ", ".join(display_sample_name(s) for s in shown)
     if overflow > 0:
         suffix += f" (+{overflow} more)"
     return suffix

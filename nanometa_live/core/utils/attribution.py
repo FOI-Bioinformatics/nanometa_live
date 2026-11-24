@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from nanometa_live.core.utils.sample_labels import display_sample_name
 
 #: Read floor for a taxon to be considered present in a sample at all. This is
 #: a discovery floor only -- whether a sample counts as *triggering* is decided
@@ -291,7 +292,7 @@ def _attribution_phrase(attribution: PathogenAttribution) -> Optional[str]:
     if primary:
         shown = primary[:3]
         overflow = len(primary) - len(shown)
-        names = ", ".join(shown)
+        names = ", ".join(display_sample_name(s) for s in shown)
         if overflow > 0:
             names += f", +{overflow} more"
         return f"{attribution.pathogen} ({names}){nc_clause}"
@@ -315,7 +316,7 @@ def _attribution_phrase(attribution: PathogenAttribution) -> Optional[str]:
         # build_pathogen_attribution appends in that order), so the first
         # three are the ones worth naming.
         shown = below[:3]
-        names = ", ".join(shown)
+        names = ", ".join(display_sample_name(s) for s in shown)
         overflow = n - len(shown)
         if overflow > 0:
             names += f", +{overflow} more"

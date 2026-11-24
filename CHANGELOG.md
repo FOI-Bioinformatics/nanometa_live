@@ -45,6 +45,14 @@ v0.18.0).
   `.nanometa.run.json` ("LAST RUN - Completed at 12:12 (ran 3 h 12 min)"),
   and the run-time tile shows that run's duration and state
   (`app/utils/previous_run.py`). An active run is never described this way.
+- **MinKNOW's `unclassified` barcode folder is named for what it holds.**
+  A Japanese encephalitis detection was attributed to "unclassified,
+  barcode11, barcode06": the reads MinKNOW could not assign to a barcode,
+  shown as one more sample under a word Kraken2 uses for something else.
+  The sample selector, the alert-card chips and popover, the verdict banner
+  and the System Alerts now show "unclassified (no barcode)"
+  (`core/utils/sample_labels.py`); the sample's value, paths and keys are
+  unchanged.
 
 ## [0.20.0] - 2026-11-24
 

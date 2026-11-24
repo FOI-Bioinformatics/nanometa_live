@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import dash_bootstrap_components as dbc
 from dash import html
+from nanometa_live.core.utils.sample_labels import display_sample_name
 
 
 def _attribution_pill_id(samples: List[Dict[str, Any]], tier: str) -> str:
@@ -103,7 +104,7 @@ def _render_sample_attribution(
     for rank, s in enumerate(visible, start=1):
         reads = s.get("reads", 0)
         abund = s.get("abundance", 0.0)
-        label = s.get("sample", "")
+        label = display_sample_name(s.get("sample", ""))
         is_nc = s.get("is_negative_control", False)
 
         if is_nc:
@@ -219,7 +220,7 @@ def attribution_popover_rows(samples: List[Dict[str, Any]]) -> List[html.Div]:
     """Popover rows: one per sample with reads + abundance, NC-marked."""
     rows = []
     for rank, s in enumerate(samples, start=1):
-        sample_label = s.get("sample", "")
+        sample_label = display_sample_name(s.get("sample", ""))
         reads = s.get("reads", 0)
         abund = s.get("abundance", 0.0)
         is_nc = s.get("is_negative_control", False)
