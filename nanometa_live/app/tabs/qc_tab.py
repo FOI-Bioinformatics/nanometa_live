@@ -881,7 +881,7 @@ def register_qc_callbacks(app: Dash):
         try:
             # Raw count only exists when FASTP produced before_filtering stats.
             # For Chopper pipelines this branch is skipped and raw stays None.
-            raw_reads = None
+            raw_reads = kept_reads = None
             is_chopper = True
             filter_tool = "Chopper"
 
@@ -891,10 +891,9 @@ def register_qc_callbacks(app: Dash):
                 raw_reads = reads_before
                 is_chopper = False
                 filter_tool = "FASTP"
-            else:
-                raw_reads = prefilter_read_count(main_dir, selected_sample, fastp_stats)
-                if raw_reads is not None:
-                    is_chopper = False
+            elif (chopper := load_chopper_counts(main_dir, selected_sample)):
+                raw_reads, kept_reads, is_chopper = (
+                    chopper.reads_in, chopper.reads_kept, False)
 
             # Classification counts from cumulative Kraken2 — the authoritative
             # run-total view. Filtered is derived from the same source to keep
@@ -924,6 +923,7 @@ def register_qc_callbacks(app: Dash):
                 filter_tool=filter_tool,
                 timestamp_str=timestamp_str,
                 amplicon_mode=_is_amplicon_mode(config),
+                kept_reads=kept_reads,
             )
 
         except Exception as e:

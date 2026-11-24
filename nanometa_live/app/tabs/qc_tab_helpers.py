@@ -253,7 +253,7 @@ def _is_amplicon_mode(config) -> bool:
 
 def _build_stage_strip(raw_reads, filtered_reads, classified_reads, unclassified_reads,
                        is_chopper, filter_tool, timestamp_str,
-                       amplicon_mode: bool = False):
+                       amplicon_mode: bool = False, kept_reads=None):
     """Build the complete Stage Strip component.
 
     All counts are cumulative-since-run-start, matching the time horizon used
@@ -300,8 +300,12 @@ def _build_stage_strip(raw_reads, filtered_reads, classified_reads, unclassified
             subtitle=f"({filter_tool})",
             slot_class="stage-strip-slot",
         )
-        if filtered_reads and raw_reads >= filtered_reads:
-            removed_pct = (raw_reads - filtered_reads) / raw_reads * 100
+        # kept_reads is the filter's own output count (chopper's "Kept K of
+        # N"); pairing its input with Kraken2's total mixes two read sets,
+        # which differ whenever classification lags the filter.
+        passed = kept_reads if kept_reads is not None else filtered_reads
+        if passed and raw_reads >= passed:
+            removed_pct = (raw_reads - passed) / raw_reads * 100
             filter_delta_text = f"{removed_pct:.1f}% removed"
         else:
             # Covers both "no filtered count yet" and raw < filtered --

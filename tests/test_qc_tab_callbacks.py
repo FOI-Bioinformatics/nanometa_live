@@ -270,3 +270,21 @@ def test_seqkit_cards_name_their_read_set(qc_app, tmp_path, _fresh_loaders, outp
     text = _text(card)
     assert "Based on 100 reads measured by SeqKit" in text
     assert "Kraken2 classified 200 reads" in text
+
+
+def test_stage_strip_removed_share_is_chopper_own_pair(qc_app, tmp_path, _fresh_loaders):
+    """Kraken2 lags chopper on a live run; the removed share must come from
+    chopper's own in/kept pair, not chopper's input over Kraken2's total
+    (found in the live check of 2026-11-24)."""
+    config = _chopper_tree(tmp_path)      # chopper: kept 120 of 150
+    report = tmp_path / "kraken2" / "barcode01.kraken2.report.txt"
+    report.write_text("20.00\t20\t20\tU\t0\tunclassified\n"
+                      "80.00\t80\t0\tR\t1\troot\n"
+                      "80.00\t80\t80\tS\t562\t  Escherichia coli\n")  # 100 reads
+    _backdate(str(tmp_path))
+    fn = get_callback_fn(qc_app, "qc-stage-strip")
+    with ctx_trigger("results-fingerprint"):
+        strip = fn("fp-lag", "barcode01", 0, config)
+    text = _text(strip)
+    assert "20.0% removed" in text
+    assert "33.3% removed" not in text
