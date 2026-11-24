@@ -21,6 +21,7 @@ from typing import List
 
 import dash
 from dash import Dash, Input, Output, State, ctx, dcc, no_update, html
+from nanometa_live.core.utils.read_support import read_support_level
 from nanometa_live.app.utils.debounce import (
     interval_tick_is_redundant_store, fp_to_store,
 )
@@ -503,9 +504,6 @@ def register_main_callbacks(app: Dash):
                 )
                 logging.debug(f"Loaded BLAST validation for {len(blast_validation_data)} species")
 
-            # Get confidence thresholds from config (with defaults)
-            high_confidence_threshold = config.get('high_confidence_reads', 1000)
-            medium_confidence_threshold = config.get('medium_confidence_reads', 100)
 
             # Split watchlist species into detected and not detected.
             # Detected species become cards here; not-detected species are
@@ -540,13 +538,8 @@ def register_main_callbacks(app: Dash):
                         })
                         continue
 
-                    # Determine confidence based on read count
-                    if species['reads'] >= high_confidence_threshold:
-                        confidence = "high"
-                    elif species['reads'] >= medium_confidence_threshold:
-                        confidence = "medium"
-                    else:
-                        confidence = "low"
+                    # The one read-support rule every card shares.
+                    confidence = read_support_level(species['reads'])
 
                     # Past the visible cap: data only, card built on click.
                     if len(detected_cards) >= MAX_VISIBLE_CARDS:
@@ -689,13 +682,7 @@ def register_main_callbacks(app: Dash):
             organism_overflow = []
             n_non_watched = 0
             for name, abundance, read_count, taxid, rank in zip(names, abundances, read_counts, taxids, ranks):
-                # Determine confidence based on read count (using configurable thresholds)
-                if read_count >= high_confidence_threshold:
-                    confidence = "high"
-                elif read_count >= medium_confidence_threshold:
-                    confidence = "medium"
-                else:
-                    confidence = "low"
+                confidence = read_support_level(read_count)
 
                 # Show validate button for non-watched organisms with sufficient reads
                 # when BLAST validation is enabled

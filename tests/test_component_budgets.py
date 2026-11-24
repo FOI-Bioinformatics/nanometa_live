@@ -218,7 +218,8 @@ class TestOrganismCardBudget:
 
     def test_confidence_explanation_survives_as_native_title(self):
         titles = [getattr(n, "title", None) for n in self._walk(self._card())]
-        assert any(t and "confidence" in t for t in titles if isinstance(t, str))
+        from nanometa_live.core.utils.read_support import READ_SUPPORT_TOOLTIP
+        assert READ_SUPPORT_TOOLTIP in titles
 
 
 class TestNotDetectedLazyRender:

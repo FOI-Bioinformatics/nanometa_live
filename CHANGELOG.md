@@ -27,6 +27,17 @@ v0.18.0).
   `qc_tab_helpers.prefilter_read_count`). chopper does not say why it
   dropped a read, so the per-reason lines say "not recorded by the read
   filter". A run without the files reads as before.
+- **One read-support rule on every card, named for what it measures.**
+  "High confidence" meant 100 reads or more on the Dashboard alert cards
+  and 1,000 or more on the Organisms cards, showed no threshold, and sat
+  beside "pending confirmatory validation", where it read as if the
+  identification had been confirmed. Every card, the Pathogen Report modal
+  and the help text now use `core/utils/read_support.py` (high at 100
+  reads, moderate at 20) and say "read support", with the thresholds and
+  "does not confirm the identification" on hover. A species with 500 reads
+  is now high on the Organisms tab, as it already was on the Dashboard.
+  The unused `high_confidence_reads` / `medium_confidence_reads` config
+  reads are gone.
 
 ## [0.20.0] - 2026-11-24
 

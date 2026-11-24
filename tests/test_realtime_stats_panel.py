@@ -61,7 +61,7 @@ class TestPanel:
         panel = build_realtime_performance_panel(stats)
         text = str(panel)
         assert "Live Performance" in text
-        assert "Reads/sec" in text and "Batches" in text
+        assert "Est. reads/sec" in text and "Batches" in text
         assert "Throughput dropped" in text  # alert surfaced
 
 

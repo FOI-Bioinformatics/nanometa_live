@@ -319,8 +319,10 @@ def _main_help_card():
                     "Higher numbers indicate more confident identification"
                 ]),
                 html.Li([
-                    html.Strong("Confidence: "),
-                    "HIGH, MEDIUM, or LOW based on read count thresholds (configurable in settings)"
+                    html.Strong("Read support: "),
+                    "High at 100 or more classified reads, moderate at 20 to 99, "
+                    "low below that. It counts reads only and does not confirm "
+                    "the identification; the Validation tab does"
                 ]),
                 html.Li([
                     html.Strong("BLAST Validation: "),

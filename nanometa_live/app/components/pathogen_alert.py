@@ -10,6 +10,11 @@ from typing import Optional, List, Dict, Any
 from dash import html
 import dash_bootstrap_components as dbc
 
+from nanometa_live.core.utils.read_support import (
+    READ_SUPPORT_TOOLTIP,
+    read_support_label,
+)
+
 
 from nanometa_live.app.components.attribution import (  # noqa: F401
     _attribution_pill_id,
@@ -266,11 +271,11 @@ def CriticalPathogenAlert(
             text_color="dark",
             className="me-2"
         ),
-        dbc.Badge(
-            f"{confidence} confidence",
+        html.Span(dbc.Badge(
+            read_support_label(confidence),
             color="success" if confidence == "HIGH" else "warning",
             className="me-2"
-        )
+        ), title=READ_SUPPORT_TOOLTIP)
     ]
 
     if blast_verified:
@@ -361,7 +366,7 @@ def CriticalPathogenAlert(
 
                 # Confidence bar
                 html.Div([
-                    html.Small("Detection certainty", className="text-muted me-2"),
+                    html.Small("Read support", className="text-muted me-2"),
                     dbc.Progress(
                         value=100 if confidence == "HIGH" else 60 if confidence in _MID_CONFIDENCE else 25,
                         color="success" if confidence == "HIGH" else "warning" if confidence in _MID_CONFIDENCE else "danger",
@@ -369,7 +374,8 @@ def CriticalPathogenAlert(
                         className="my-1"
                     ),
                     html.Small(confidence, className="ms-2 fw-semibold")
-                ], className="d-flex align-items-center mb-3", style={"maxWidth": "300px"}),
+                ], className="d-flex align-items-center mb-3", style={"maxWidth": "300px"},
+                    title=READ_SUPPORT_TOOLTIP),
 
                 # Recommendation
                 html.Div([
@@ -466,7 +472,8 @@ def HighRiskPathogenAlert(
                 html.Small([
                     f"{read_count:,} DNA matches | ",
                     f"{abundance_pct:.2f}% of sample | ",
-                    f"{confidence} confidence"
+                    html.Span(read_support_label(confidence).lower(),
+                              title=READ_SUPPORT_TOOLTIP),
                 ], className="text-muted"),
                 # Per-sample attribution row (always visible for high-risk tier)
                 *([attr_row] if attr_row else []),

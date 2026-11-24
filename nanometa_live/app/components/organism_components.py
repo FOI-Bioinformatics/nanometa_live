@@ -8,6 +8,7 @@ in Main Results and Classification tabs.
 from typing import Optional, Dict, List
 from dash import html, dcc
 import dash_bootstrap_components as dbc
+from nanometa_live.core.utils.read_support import READ_SUPPORT_TOOLTIP, read_support_label
 import plotly.graph_objects as go
 
 
@@ -272,30 +273,29 @@ def OrganismCard(
         ...     blast_validation={'validation_rate': 85, 'status': 'validated'}
         ... )
     """
-    # Confidence badge styling
-    # "none" = not detected (watchlist entry with 0 reads)
+    # Read-support badge styling. Levels come from
+    # core.utils.read_support; "medium" is the word older callers pass, and
+    # "none" is a watchlist entry with 0 reads.
     confidence_colors = {
         "high": "success",
+        "moderate": "warning",
         "medium": "warning",
         "low": "danger",
         "none": "secondary"  # Gray for undetected
     }
     confidence_icons = {
         "high": "check-circle-fill",
+        "moderate": "dash-circle-fill",
         "medium": "dash-circle-fill",
         "low": "exclamation-triangle-fill",
         "none": "circle"  # Empty circle for undetected
     }
-    confidence_labels = {
-        "high": "High Confidence",
-        "medium": "Medium Confidence",
-        "low": "Low Confidence",
-        "none": "Not Detected"
-    }
 
-    confidence_color = confidence_colors.get(confidence.lower(), "secondary")
-    confidence_icon = confidence_icons.get(confidence.lower(), "question-circle")
-    confidence_label = confidence_labels.get(confidence.lower(), "Unknown")
+    level_word = str(confidence or "").lower()
+    confidence_color = confidence_colors.get(level_word, "secondary")
+    confidence_icon = confidence_icons.get(level_word, "question-circle")
+    confidence_label = ("Not Detected" if level_word == "none"
+                        else read_support_label(level_word))
 
     # Check if this is an undetected species
     is_undetected = confidence.lower() == "none"
@@ -437,11 +437,7 @@ def OrganismCard(
                         className="me-2",
                         id={"type": "confidence-badge", "taxid": taxid or 0},
                     ),
-                    title=(
-                        "Based on the number of matching DNA sequences. "
-                        "More sequences means higher confidence that this "
-                        "organism is truly present in the sample."
-                    ),
+                    title=READ_SUPPORT_TOOLTIP,
                 ),
                 html.Small(
                     f"Identified at {_rank_to_plain_language(rank)} level",

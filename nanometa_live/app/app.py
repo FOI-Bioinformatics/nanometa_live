@@ -128,6 +128,7 @@ def _ensure_background_callback_manager(base_cache_dir: str) -> DiskcacheManager
 
     return background_callback_manager
 
+from nanometa_live.core.utils.read_support import READ_SUPPORT_TOOLTIP
 from nanometa_live import __version__
 from nanometa_live.app.layouts.main_layout import create_main_layout
 from nanometa_live.app.layouts.qc_layout import create_qc_layout
@@ -706,7 +707,8 @@ def create_app(
                                 html.H5(id="pathogen-modal-abundance")
                             ], md=4),
                             dbc.Col([
-                                html.Label("Confidence", className="text-muted small"),
+                                html.Label("Read support", className="text-muted small",
+                                           title=READ_SUPPORT_TOOLTIP),
                                 html.H5(id="pathogen-modal-confidence")
                             ], md=4),
                             dbc.Col([

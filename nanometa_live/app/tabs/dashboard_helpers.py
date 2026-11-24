@@ -392,22 +392,15 @@ def build_reference_links(
 
 
 def compute_detection_confidence(reads, abundance_pct=None) -> str:
-    """Detection confidence derived from read support -- NOT a statistical
-    confidence interval. More reads backing a classification means a more
-    trustworthy call. Returns 'N/A' when no read count is available so the
-    report never implies confidence it cannot support.
+    """Read support for the modal and the report: ``High`` / ``Moderate`` /
+    ``Low``, or ``N/A`` without a read count. Not a statistical confidence
+    interval; the bands are ``core.utils.read_support``'s, shared with every
+    card so one detection carries one level everywhere.
     """
-    try:
-        r = int(reads)
-    except (TypeError, ValueError):
-        return "N/A"
-    if r >= 100:
-        return "High"
-    if r >= 20:
-        return "Moderate"
-    if r >= 1:
-        return "Low"
-    return "N/A"
+    from nanometa_live.core.utils.read_support import read_support_level
+
+    return {"high": "High", "moderate": "Moderate", "low": "Low"}.get(
+        read_support_level(reads), "N/A")
 
 
 def _card_confidence(reads) -> str:
