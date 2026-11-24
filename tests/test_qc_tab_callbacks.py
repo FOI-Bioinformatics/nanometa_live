@@ -241,3 +241,32 @@ def test_guidance_receives_chopper_prefilter(qc_app, tmp_path, _fresh_loaders):
             ctx_trigger("results-fingerprint"):
         fn("fp-guide", "barcode01", 0, config)
     assert seen["pre_filter"] == 150
+
+
+def _seqkit_vs_kraken_tree(root):
+    """SeqKit measured 100 reads, Kraken2 classified 200."""
+    (root / "kraken2").mkdir(parents=True)
+    (root / "kraken2" / "barcode01.kraken2.report.txt").write_text(
+        "10.00\t20\t20\tU\t0\tunclassified\n"
+        "90.00\t180\t0\tR\t1\troot\n"
+        "90.00\t180\t180\tS\t562\t  Escherichia coli\n")
+    (root / "seqkit").mkdir()
+    (root / "seqkit" / "barcode01.tsv").write_text(
+        "file\tformat\ttype\tnum_seqs\tsum_len\tmin_len\tavg_len\tmax_len\t"
+        "Q20(%)\tQ30(%)\tAvgQual\tGC(%)\n"
+        "barcode01.chopped.fastq.gz\tFASTQ\tDNA\t100\t100000\t1000\t1000.0\t1000\t"
+        "80.0\t60.0\t15.0\t49.0\n")
+    _backdate(str(root))
+    return {"results_output_directory": str(root), "main_dir": str(root)}
+
+
+@pytest.mark.parametrize("output_id", [
+    "base-quality-card-container", "read-statistics-card-container"])
+def test_seqkit_cards_name_their_read_set(qc_app, tmp_path, _fresh_loaders, output_id):
+    config = _seqkit_vs_kraken_tree(tmp_path)
+    fn = get_callback_fn(qc_app, output_id)
+    with ctx_trigger("results-fingerprint"):
+        card = fn(f"fp-{output_id}", "barcode01", 0, "qc-tab", config, {})
+    text = _text(card)
+    assert "Based on 100 reads measured by SeqKit" in text
+    assert "Kraken2 classified 200 reads" in text

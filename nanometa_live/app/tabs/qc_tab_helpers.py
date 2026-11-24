@@ -381,6 +381,36 @@ def _build_stage_strip(raw_reads, filtered_reads, classified_reads, unclassified
     return html.Div(body_children, className="stage-strip-container")
 
 
+def read_set_note(seqkit_reads, kraken_reads):
+    """(caption, mismatch) naming the reads the SeqKit cards describe.
+
+    SeqKit's merged statistics and the Kraken2 report are written by
+    different processes on different cadences, so on a live or interrupted
+    run they can describe different sets of reads: at the Barcelona exercise
+    63.9 Mb of bases sat beside 76,642 classified reads (834 bp a read) and a
+    mean length of 1,282 bp. ``mismatch`` is None when either count is zero
+    or the two agree within 1% (at least 10 reads).
+    """
+    caption = f"Based on {seqkit_reads:,} reads measured by SeqKit"
+    if not seqkit_reads or not kraken_reads:
+        return caption, None
+    if abs(seqkit_reads - kraken_reads) <= max(10, 0.01 * kraken_reads):
+        return caption, None
+    return caption, (
+        f"Kraken2 classified {kraken_reads:,} reads. The two counts come from "
+        "different files and do not describe the same set of reads."
+    )
+
+
+def with_read_set_note(card, seqkit_reads, kraken_reads):
+    """``card`` followed by its read-set caption and any mismatch line."""
+    caption, mismatch = read_set_note(seqkit_reads, kraken_reads)
+    lines = [html.Small(caption, className="text-muted d-block mt-1")]
+    if mismatch:
+        lines.append(html.Small(mismatch, className="text-warning d-block"))
+    return html.Div([card, *lines])
+
+
 def prefilter_read_count(main_dir, sample, fastp_stats=None):
     """Reads that entered the read filter, or None when nothing recorded them.
 

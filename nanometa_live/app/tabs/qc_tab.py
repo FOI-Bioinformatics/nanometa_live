@@ -57,6 +57,7 @@ from nanometa_live.app.tabs.qc_tab_helpers import (  # noqa: E402
     _kreport_sample_name,
     compute_qc_stat_lines,
     prefilter_read_count,
+    with_read_set_note,
     build_qc_figures,
     aggregate_fastp_read_stats,
     qc_guidance_issues,
@@ -85,6 +86,22 @@ def _fastp_files_for_sample(fastp_dir: str, selected_sample):
     # does not pick up barcode10's report.
     exact = os.path.join(fastp_dir, f"{selected_sample}.fastp.json")
     return [exact] if os.path.isfile(exact) else []
+
+
+def _kraken_total(main_dir, sample):
+    """Reads Kraken2 classified or left unclassified for this selection."""
+    kraken_df = load_kraken_data(main_dir, sample)
+    if kraken_df is None or kraken_df.empty:
+        return 0
+    classified, unclassified, _ = get_classification_stats(kraken_df)
+    return classified + unclassified
+
+
+def _seqkit_card_note(card, source, seqkit_reads, main_dir, sample):
+    """A SeqKit-sourced card with the reads it describes named under it."""
+    if source != "seqkit" or not seqkit_reads:
+        return card
+    return with_read_set_note(card, seqkit_reads, _kraken_total(main_dir, sample))
 
 
 def register_qc_callbacks(app: Dash):
@@ -674,7 +691,7 @@ def register_qc_callbacks(app: Dash):
             q30_rate = None
             total_bases = 0
             quality_curve = None
-            source = "unknown"
+            source, seqkit_reads = "unknown", 0
 
             # Try FASTP first (cached reduced payloads; the inline
             # json.load-per-file version cost 2 x S parses per tick)
@@ -702,7 +719,7 @@ def register_qc_callbacks(app: Dash):
                     # Base-weighted over samples (a plain mean let a 10-read
                     # sample count as much as a 1,000-read one).
                     pooled = summarize_seqkit_rows(seqkit_df)
-                    total_bases = pooled["total_bases"]
+                    total_bases, seqkit_reads = pooled["total_bases"], pooled["total_reads"]
                     q20_rate, q30_rate = pooled["q20_percent"], pooled["q30_percent"]
 
             # If no data, show empty state
@@ -712,7 +729,7 @@ def register_qc_callbacks(app: Dash):
             # Generate BaseQualityCard component. Amplicon-mode flag
             # comes from the operator's config (chopper_minlength<500
             # or filtlong_min_length<500).
-            return BaseQualityCard(
+            card = BaseQualityCard(
                 q20_rate=q20_rate,
                 q30_rate=q30_rate,
                 total_bases=total_bases,
@@ -720,6 +737,7 @@ def register_qc_callbacks(app: Dash):
                 source=source,
                 amplicon_mode=_is_amplicon_mode(config),
             )
+            return _seqkit_card_note(card, source, seqkit_reads, main_dir, selected_sample)
 
         except Exception as e:
             logging.error(f"Error updating base quality card: {e}")
@@ -778,9 +796,8 @@ def register_qc_callbacks(app: Dash):
             # Initialize metrics
             mean_length = 0.0
             mean_length_before = None
-            n50 = None
-            gc_content = None
-            source = "unknown"
+            n50 = gc_content = None
+            source, seqkit_reads = "unknown", 0
 
             # Try FASTP first (cached reduced payloads)
             if os.path.exists(fastp_dir):
@@ -802,15 +819,15 @@ def register_qc_callbacks(app: Dash):
                 if not seqkit_df.empty:
                     source = "seqkit"
                     summary = summarize_seqkit_rows(seqkit_df)  # n50 None if pooled
-                    mean_length, n50, gc_content = (
-                        summary["mean_length"], summary["n50"], summary["gc_percent"])
+                    mean_length, n50, gc_content, seqkit_reads = (
+                        summary["mean_length"], summary["n50"],
+                        summary["gc_percent"], summary["total_reads"])
 
             # If no data, show empty state
             if mean_length == 0:
                 return empty_state
 
-            # Generate ReadStatisticsCard component
-            return ReadStatisticsCard(
+            card = ReadStatisticsCard(
                 mean_length=mean_length,
                 mean_length_before=mean_length_before,
                 n50=n50,
@@ -818,6 +835,7 @@ def register_qc_callbacks(app: Dash):
                 source=source,
                 amplicon_mode=_is_amplicon_mode(config),
             )
+            return _seqkit_card_note(card, source, seqkit_reads, main_dir, selected_sample)
 
         except Exception as e:
             logging.error(f"Error updating read statistics card: {e}")

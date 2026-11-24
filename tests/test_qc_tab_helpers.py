@@ -320,3 +320,30 @@ def test_stat_lines_without_removal_breakdown_say_not_recorded():
     assert "Too short: not recorded by the read filter" in joined
     assert "Too low quality: not recorded by the read filter" in joined
     assert "Too low complexity: not recorded by the read filter" in joined
+
+
+# --------------------------------------------------------------------------- #
+# Which reads the SeqKit cards describe (Barcelona exercise feedback,
+# 2026-11-24: 63.9 Mb over 76,642 reads is 834 bp, beside a mean length of
+# 1,282 bp, because SeqKit had measured about 49,900 of them)
+# --------------------------------------------------------------------------- #
+
+def test_read_set_note_flags_a_mismatch():
+    from nanometa_live.app.tabs.qc_tab_helpers import read_set_note
+    caption, mismatch = read_set_note(49860, 76642)
+    assert caption == "Based on 49,860 reads measured by SeqKit"
+    assert "Kraken2 classified 76,642 reads" in mismatch
+    assert "do not describe the same set of reads" in mismatch
+
+
+def test_read_set_note_within_tolerance():
+    from nanometa_live.app.tabs.qc_tab_helpers import read_set_note
+    assert read_set_note(76642, 76600)[1] is None      # within 1%
+    assert read_set_note(95, 100)[1] is None           # within 10 reads
+    assert read_set_note(80, 100)[1] is not None
+
+
+def test_read_set_note_without_a_count():
+    from nanometa_live.app.tabs.qc_tab_helpers import read_set_note
+    assert read_set_note(0, 5)[1] is None
+    assert read_set_note(5, 0)[1] is None

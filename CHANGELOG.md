@@ -53,6 +53,15 @@ v0.18.0).
   and the System Alerts now show "unclassified (no barcode)"
   (`core/utils/sample_labels.py`); the sample's value, paths and keys are
   unchanged.
+- **The QC base-statistics cards say which reads they describe.** SeqKit's
+  merged statistics and the Kraken2 report are written on different
+  cadences and can describe different reads: at the exercise 63.9 Mb of
+  bases sat beside 76,642 classified reads (834 bp a read) and a mean
+  length of 1,282 bp, because SeqKit had measured about 49,900 of them.
+  The Base Quality and Read Statistics cards now name their SeqKit read
+  count and, when Kraken2's count differs by more than 1% (and 10 reads),
+  say that the two describe different sets of reads
+  (`qc_tab_helpers.read_set_note`).
 
 ## [0.20.0] - 2026-11-24
 
