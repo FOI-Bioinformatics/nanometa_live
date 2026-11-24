@@ -22,7 +22,7 @@ python -m venv nanometa_env
 source nanometa_env/bin/activate
 
 # Install
-pip install "nanometa-live @ git+https://github.com/FOI-Bioinformatics/nanometa_live@0.19.0"
+pip install "nanometa-live @ git+https://github.com/FOI-Bioinformatics/nanometa_live@0.20.0"
 ```
 
 ### Install with conda
@@ -30,7 +30,7 @@ pip install "nanometa-live @ git+https://github.com/FOI-Bioinformatics/nanometa_
 ```bash
 conda create -n nanometa "python>=3.11"
 conda activate nanometa
-pip install "nanometa-live @ git+https://github.com/FOI-Bioinformatics/nanometa_live@0.19.0"
+pip install "nanometa-live @ git+https://github.com/FOI-Bioinformatics/nanometa_live@0.20.0"
 ```
 
 For a field laptop that will run without a network, build the environment

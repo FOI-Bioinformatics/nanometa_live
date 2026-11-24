@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-24
+
+**Requires nanometanf v1.12.0**: this release sends a digit-only sample
+name, a single taxid to validate and a schema-validated `--validation_only`
+launch, which v1.11.0 refuses, and Start Analysis refuses an older checkout
+by name.
+
+Most of the changes below come from audits between 2026-10-28 and
+2026-11-24 and from live tests of the interface. Start is gated on the
+readiness checklist and the run lock records the pipeline's process; the
+launch sends the machine's memory ceiling; on-demand validation shares the
+main run's resolution and reads the incremental classifier's output;
+watchlist matching, the taxid mapping and the exported report key on entry
+identity, and GTDB report names match NCBI watchlist names. Values the
+interface showed without having measured them (QC rates, read-filter
+counts, validation identity, organism counts, export totals) are now
+measured or marked as not measured. The Sankey and Sunburst charts place
+each taxon under its nearest displayed ancestor, colour by lineage and mark
+watched taxa.
+
 ### Fixed
 
 - **Medium findings of the 2026-11-24 live test.** Each displayed value is

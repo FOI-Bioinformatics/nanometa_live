@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Tuple
 
 #: The oldest nanometanf that accepts every parameter shape this GUI sends.
-#: 1.12.0 (dev since 2026-11) types ``sample_name`` and ``taxids_to_validate``
+#: 1.12.0 (released 2026-11-24) types ``sample_name`` and ``taxids_to_validate``
 #: as string-or-integer, so a digit-only sample name and the single-taxid
 #: on-demand call pass nf-schema, and runs ``PIPELINE_INITIALISATION`` for
 #: ``--validation_only``; 1.11.0 refused all three. A ``1.12.0dev`` checkout
